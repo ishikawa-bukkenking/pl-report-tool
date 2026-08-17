@@ -1010,6 +1010,12 @@ function buildStandaloneExportHtml(data){
   const bodyContent = document.getElementById('report-root').innerHTML;
   const reportDataJson = JSON.stringify({ plan_keys: data.plansViewList.map(p=>p.key), plans: data.plans });
   const companyNameEsc = escapeHtml(data.companyName);
+  const safeName = data.companyName.replace(/[\\/:*?"<>|]/g, '') || 'report';
+  const downloadFileName = `損益計算書_${safeName}.html`;
+  // 単体HTMLとして書き出す版には、元のツール画面の「保存ボタン」群（report-toolbar）が
+  // 含まれない（report-root の中身しか持ち出していないため）。スプレッドシート経由で
+  // 開いたときにも手元に保存できるよう、このファイル自身にも簡易的なダウンロードボタンを
+  // 付けておく（クリック時点のDOMをそのまま書き出すだけの自己完結ボタン）。
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -1020,10 +1026,25 @@ function buildStandaloneExportHtml(data){
 <style>${css}</style>
 </head>
 <body>
+<div class="report-toolbar" style="position:sticky; top:0; z-index:50; background:var(--bg);">
+  <button class="btn-secondary" id="standaloneDownloadBtn">このページをHTMLファイルとして保存</button>
+</div>
 <div id="report-root">${bodyContent}</div>
 <script>
 const REPORT_DATA = ${reportDataJson};
 (${REPORT_JS.toString()})();
+document.getElementById('standaloneDownloadBtn').addEventListener('click', function(){
+  const html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = ${JSON.stringify(downloadFileName)};
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+});
 <\/script>
 </body>
 </html>`;
