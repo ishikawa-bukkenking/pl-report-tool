@@ -313,6 +313,7 @@
   <div class="report-toolbar">
     <span id="exportStatus" style="font-size:12.5px; align-self:center; opacity:0; transition:opacity .3s ease;"></span>
     <button class="btn-secondary" id="backToBuilderBtn">← 入力に戻る</button>
+    <button class="btn-secondary" id="downloadHtmlBtn">HTMLファイルをダウンロード</button>
     <button class="btn-secondary" id="exportHtmlBtn">この内容を保存する</button>
   </div>
   <div id="report-root"></div>
@@ -1057,7 +1058,10 @@ function logToSpreadsheet(data, html){
   return true;
 }
 
-async function exportStandaloneHtml(){
+// 「HTMLファイルをダウンロード」ボタン：スプレッドシート連携の設定有無に関わらず、
+// 常にレポートをファイルとしてダウンロードする（Artifact版はdownloads capability、
+// それ以外は通常のブラウザダウンロード）。
+async function downloadReportHtml(){
   const data = window.__lastReportData;
   if(!data) return;
   const html = buildStandaloneExportHtml(data);
@@ -1065,12 +1069,11 @@ async function exportStandaloneHtml(){
   const filename = `損益計算書_${safeName}.html`;
 
   if (isArtifactSandbox()) {
-    // claude.ai のArtifact版はスプレッドシート連携が使えないため、ファイル保存のみ提供する。
     const downloads = await claude.use('downloads');
     if (downloads) {
       try {
         await downloads.save({ filename, data: html });
-        showExportStatus('保存しました。');
+        showExportStatus('HTMLファイルを保存しました。');
       } catch (err) {
         const code = err && err.code;
         if (code === 'declined') {
@@ -1095,17 +1098,25 @@ async function exportStandaloneHtml(){
     return;
   }
 
-  // GitHub Pages版・ローカル版：スプレッドシート連携が設定されていれば、
-  // ローカルへのダウンロードはせずスプレッドシート（＋Google Drive）にのみ保存する。
-  // 未設定の場合は、これまで通りブラウザのファイルダウンロードにフォールバックする。
-  if (SPREADSHEET_WEBAPP_URL) {
+  downloadFileLocally(html, filename);
+  showExportStatus('HTMLファイルをダウンロードしました。');
+}
+
+// 「この内容を保存する」ボタン：スプレッドシート連携が設定されていればスプレッドシート
+// （＋Google Drive）にのみ保存する（ローカルへのダウンロードはしない）。
+// Artifact版や連携未設定の場合は、HTMLファイルのダウンロードにフォールバックする。
+async function exportStandaloneHtml(){
+  const data = window.__lastReportData;
+  if(!data) return;
+
+  if (!isArtifactSandbox() && SPREADSHEET_WEBAPP_URL) {
+    const html = buildStandaloneExportHtml(data);
     logToSpreadsheet(data, html);
     showExportStatus('スプレッドシートに保存しました。');
     return;
   }
 
-  downloadFileLocally(html, filename);
-  showExportStatus('スプレッドシート連携が未設定のため、HTMLファイルとしてダウンロードしました。');
+  await downloadReportHtml();
 }
 
 // ---- 6. ページ初期化 ----
@@ -1130,6 +1141,7 @@ document.getElementById('backToBuilderBtn').addEventListener('click', ()=>{
 });
 
 document.getElementById('exportHtmlBtn').addEventListener('click', exportStandaloneHtml);
+document.getElementById('downloadHtmlBtn').addEventListener('click', downloadReportHtml);
 </script>
 
 </body>
