@@ -1064,15 +1064,13 @@ async function exportStandaloneHtml(){
   const safeName = data.companyName.replace(/[\\/:*?"<>|]/g, '') || 'report';
   const filename = `損益計算書_${safeName}.html`;
 
-  const loggedToSheet = logToSpreadsheet(data, html);
-  const sheetMsg = loggedToSheet ? '／スプレッドシートにも記録しました' : '';
-
   if (isArtifactSandbox()) {
+    // claude.ai のArtifact版はスプレッドシート連携が使えないため、ファイル保存のみ提供する。
     const downloads = await claude.use('downloads');
     if (downloads) {
       try {
         await downloads.save({ filename, data: html });
-        showExportStatus('保存しました' + sheetMsg + '。');
+        showExportStatus('保存しました。');
       } catch (err) {
         const code = err && err.code;
         if (code === 'declined') {
@@ -1085,7 +1083,7 @@ async function exportStandaloneHtml(){
             await downloads.save({ filename: txtFilename, data: html });
             showExportStatus('この環境の制限でtxt形式で保存しました。保存後にファイル名の拡張子を.htmlに変更してください。', true);
           } catch (err2) {
-            showExportStatus('この環境ではファイル保存に対応していません。お手数ですがローカル版（pl_builder.html）をダウンロードしてご利用ください。', true);
+            showExportStatus('この環境ではファイル保存に対応していません。お手数ですがGitHub Pages版かローカル版をご利用ください。', true);
           }
         } else {
           showExportStatus('保存に失敗しました。もう一度お試しください。', true);
@@ -1093,13 +1091,21 @@ async function exportStandaloneHtml(){
       }
       return;
     }
-    showExportStatus('この環境ではファイル保存に対応していません。お手数ですがローカル版（pl_builder.html）をダウンロードしてご利用ください。', true);
+    showExportStatus('この環境ではファイル保存に対応していません。お手数ですがGitHub Pages版かローカル版をご利用ください。', true);
     return;
   }
 
-  // ローカルファイル（ダブルクリックで開いた場合）はブラウザの通常のダウンロードを使う
+  // GitHub Pages版・ローカル版：スプレッドシート連携が設定されていれば、
+  // ローカルへのダウンロードはせずスプレッドシート（＋Google Drive）にのみ保存する。
+  // 未設定の場合は、これまで通りブラウザのファイルダウンロードにフォールバックする。
+  if (SPREADSHEET_WEBAPP_URL) {
+    logToSpreadsheet(data, html);
+    showExportStatus('スプレッドシートに保存しました。');
+    return;
+  }
+
   downloadFileLocally(html, filename);
-  showExportStatus('保存しました' + sheetMsg + '。');
+  showExportStatus('スプレッドシート連携が未設定のため、HTMLファイルとしてダウンロードしました。');
 }
 
 // ---- 6. ページ初期化 ----
