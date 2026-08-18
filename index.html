@@ -577,16 +577,18 @@ function computeReportData(){
     const sgaMonthlyValue = SGA_FIELD_DEFS.reduce((s,f)=>s + master.sga[f.id], 0);
     const sgaTotal = Array(24).fill(sgaMonthlyValue);
     const operatingProfit = grossProfit.map((v,i)=>v - sgaTotal[i]);
-    // 累計損益：初月はイニシャルコスト全額（導入費用＋年会費＋宅建業取得費用）を差し引き、
-    // 13ヶ月目（2年目の開始月）は物件王年会費が年次更新で再度発生するため、その分だけ差し引く
-    // （Excel版の数式 D35=D33-AF13-AF14-AF15 / Q35=Q33-AF14 と同じロジック）。
+    // 累計損益：1〜24ヶ月を通して途切れず積み上がる累計にする。
+    // 初月はイニシャルコスト全額（導入費用＋年会費＋宅建業取得費用）を差し引き、
+    // 13ヶ月目（2年目の開始月）は物件王年会費が年次更新で再度発生するため、
+    // それまでの累計に「その月の営業利益を足し、年会費だけを追加で差し引く」形にする
+    // （1年目の累計をリセットせず、そのまま2年目に積み上げていく）。
     const initialSum = Object.values(initial).reduce((s,v)=>s + v, 0);
     const cumulativeProfit = [];
     operatingProfit.forEach((v,i)=>{
       if(i === 0){
         cumulativeProfit.push(v - initialSum);
       } else if(i === 12){
-        cumulativeProfit.push(v - initial.annual_fee);
+        cumulativeProfit.push(cumulativeProfit[i-1] + v - initial.annual_fee);
       } else {
         cumulativeProfit.push(cumulativeProfit[i-1] + v);
       }
@@ -803,14 +805,13 @@ function buildReportHTML(data){
     <div class="header-inner">
       <h1>${companyNameEsc}</h1>
       <div class="title-main">損益計算書</div>
-      <div class="sub">プラン別 24ヶ月事業計画シミュレーション</div>
     </div>
   </div>
   <div class="container">
     <div class="plan-tabs" id="planTabs">${tabsHtml}</div>
     ${panelsHtml}
     <div class="card">
-      <h2>前提条件（マスターページ）<span class="badge">全プラン共通・表示のみ</span></h2>
+      <h2>前提条件<span class="badge">全プラン共通・表示のみ</span></h2>
       <div class="assumptions-grid">
         <div><h3>売上参考数値</h3><ul class="assumptions-list">${masterSalesHtml}</ul></div>
         <div><h3>販管費</h3><ul class="assumptions-list">${masterSgaHtml}</ul></div>
