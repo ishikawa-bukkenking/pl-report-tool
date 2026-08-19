@@ -63,38 +63,10 @@
     --plan-basic-text:#a3391a;
     --plan-standard-text:#2d47b0;
   }
-  @media (prefers-color-scheme: dark){
-    :root:not([data-theme="light"]){
-      --bg:#11161f;
-      --surface:#1a2130;
-      --surface-alt:#212a3b;
-      --tint:#1d2b3f;
-      --border:#2b3548;
-      --text:#e6eaf1;
-      --text-muted:#9aa7bb;
-      --heading:#dbe6f7;
-      --neg:#ff8a75;
-      --input-bg:#141b26;
-      --plan-light-text:#f0a655;
-      --plan-basic-text:#f2896a;
-      --plan-standard-text:#8aa3ff;
-    }
-  }
-  :root[data-theme="dark"]{
-    --bg:#11161f;
-    --surface:#1a2130;
-    --surface-alt:#212a3b;
-    --tint:#1d2b3f;
-    --border:#2b3548;
-    --text:#e6eaf1;
-    --text-muted:#9aa7bb;
-    --heading:#dbe6f7;
-    --neg:#ff8a75;
-    --input-bg:#141b26;
-    --plan-light-text:#f0a655;
-    --plan-basic-text:#f2896a;
-    --plan-standard-text:#8aa3ff;
-  }
+  /* ダークモード（OS/ブラウザの prefers-color-scheme: dark に自動追従する仕組み）は
+     見にくいとのフィードバックにより廃止し、常にライトモードの配色で固定表示する。
+     切り替えボタンなどは元々存在しないため、@media (prefers-color-scheme: dark) の
+     ブロックを削除するだけで、システム側の設定に関わらず常にライトモードになる。 */
   *{box-sizing:border-box;}
   body{
     margin:0;
