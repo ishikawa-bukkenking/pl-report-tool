@@ -304,9 +304,14 @@
     .stat{ padding:2mm 3mm; }
     .stat .value{ font-size:15px !important; }
 
-    .composition-layout{ gap:6mm; }
-    .composition-chart-wrap{ width:150px !important; height:150px !important; break-inside:avoid; }
-    .chart-wrap{ height:220px !important; break-inside:avoid; }
+    /* グラフの入れ物（.composition-chart-wrap / .chart-wrap）は画面表示時と同じ
+       サイズのまま印刷する。Chart.jsのcanvasは初期描画時のコンテナサイズで
+       ビットマップを作るため、印刷用CSSでサイズだけ変えてもcanvas側が追従して
+       くれるとは限らず（ResizeObserver/resize()の実行タイミングがブラウザや
+       印刷パイプラインによって不安定で、実機検証でグラフが欠けたり隣の要素と
+       重なったりする不具合が確認されたため）、サイズそのものを変えない方針にした。
+       A4横向きなら幅に余裕があるため、画面と同じ大きさのままでも問題なく収まる。 */
+    .composition-chart-wrap, .chart-wrap{ break-inside:avoid; }
 
     .table-scroll{ overflow:visible !important; border:none; }
     table{ min-width:0 !important; width:100%; table-layout:auto; font-size:7.5px; }
@@ -981,13 +986,66 @@ function REPORT_JS(){
   }
   REPORT_DATA.plan_keys.forEach(initCompositionChart);
 
-  // PDF/印刷直前にすべてのグラフを再描画する。Chart.jsは画面表示時のサイズでビットマップを
-  // 描いており、印刷用CSSでカードの幅・グラフの高さが変わってもそのままだとぼやけてしまうため、
-  // 印刷ダイアログが開く直前（beforeprint）に一旦リサイズして、印刷時の実サイズで描き直す。
-  window.addEventListener('beforeprint', function(){
-    Object.keys(charts).forEach(function(k){ if(charts[k] && charts[k].chart) charts[k].chart.resize(); });
-    Object.keys(compositionCharts).forEach(function(k){ if(compositionCharts[k] && compositionCharts[k].chart) compositionCharts[k].chart.resize(); });
-  });
+  // 印刷時にグラフのcanvasがズレる／欠ける不具合の原因は、印刷用CSSでグラフの
+  // 入れ物のサイズを画面表示時から変更し、そのあとJS側でChart.jsのresize()を
+  // 呼んで追従させようとしていたこと（resize()やResizeObserverの実行タイミングが
+  // ブラウザ／印刷パイプラインによって不安定で、実機・検証環境の双方でグラフが
+  // 欠けたり隣の要素と重なったりする不具合を確認済み）。そのため方針を変更し、
+  // グラフの入れ物は印刷時も画面表示時と同じサイズのまま変えないようにした
+  // （CSS側 `.composition-chart-wrap, .chart-wrap{ break-inside:avoid; }` 参照）。
+  // サイズが変わらない以上リサイズ自体が不要になり、この手のタイミング問題が
+  // 構造的に起きなくなる。
+  //
+  // ただし別の原因でグラフが「消える」不具合が残っている：非表示中のプランタブ
+  // （.plan-panel.active以外）はdisplay:noneのままグラフが初期化されるため、
+  // Chart.jsがコンテナのサイズを0×0だと認識してしまい、空のグラフになる
+  // （画面上はタブを一度でも開けば直る＝resizeActiveChart()で解消するが、
+  // 一度も開いていないタブのまま印刷すると空白のまま出力されてしまう）。
+  //
+  // 一度0×0で初期化されたグラフは、あとからコンテナを表示状態にして
+  // chart.resize()を呼んでも直らない（実機・検証環境の両方で確認済み。
+  // Chart.js内部のサイズ検知がResizeObserverの非同期コールバックに依存して
+  // おり、印刷直前のタイミングではそのコールバックが間に合わない/発火しない
+  // ケースがあるため）。そのため resize() では直さず、0×0のままの
+  // グラフだけ一旦破棄して、既に表示状態になったコンテナの上で作り直す
+  // （新規作成時のサイズ測定は同期的に行われるため確実に正しいサイズになる）。
+  function fixHiddenPlanChartsForPrint(){
+    document.querySelectorAll('.plan-panel').forEach(function(p){ p.dataset.printForcedVisible = p.classList.contains('active') ? '' : '1'; if(!p.classList.contains('active')) p.style.display = 'block'; });
+    // 強制的にレイアウトを確定させてから読む（同期リフローの強制）。
+    void document.body.offsetHeight;
+    REPORT_DATA.plan_keys.forEach(function(k){
+      const lineState = charts[k];
+      if(lineState && lineState.chart && (lineState.chart.width === 0 || lineState.chart.height === 0)){
+        lineState.chart.destroy();
+        initChartForPlan(k);
+      }
+      const compState = compositionCharts[k];
+      if(compState && compState.chart && (compState.chart.width === 0 || compState.chart.height === 0)){
+        // 一度も開いていないタブの構成比チャートは、ユーザーが範囲ボタン
+        // （1年目/2年目/2年間累計）を操作しようがないため、常に初期値の
+        // '24'（2年間累計）のまま。initCompositionChart()はそれで作り直す。
+        compState.chart.destroy();
+        initCompositionChart(k);
+      }
+    });
+  }
+  function restoreHiddenPlanPanels(){
+    document.querySelectorAll('.plan-panel').forEach(function(p){
+      if(p.dataset.printForcedVisible === '1'){ p.style.display = ''; }
+      delete p.dataset.printForcedVisible;
+    });
+  }
+  // 「生成する」を押し直すたびにREPORT_JS()が再実行され、charts/compositionChartsは
+  // その都度新しいクロージャで作り直される。単純にaddEventListenerするだけだと
+  // 前回生成時点の（既にDOMから外れた）古いチャートを掴んだままのリスナーが
+  // 積み重なってしまうため、前回登録分を明示的に外してから登録し直す。
+  if(window.__printFixListeners){
+    window.removeEventListener('beforeprint', window.__printFixListeners.before);
+    window.removeEventListener('afterprint', window.__printFixListeners.after);
+  }
+  window.__printFixListeners = { before: fixHiddenPlanChartsForPrint, after: restoreHiddenPlanPanels };
+  window.addEventListener('beforeprint', fixHiddenPlanChartsForPrint);
+  window.addEventListener('afterprint', restoreHiddenPlanPanels);
 
   function updateCompositionChart(planKey){
     const state = compositionCharts[planKey];
