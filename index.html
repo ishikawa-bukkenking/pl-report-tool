@@ -219,6 +219,15 @@
   }
   .field input:focus{ outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent); }
   .field .unit{ font-size:12.5px; color:var(--text-muted); white-space:nowrap; }
+  .field input[disabled]{ background:var(--surface-alt); color:var(--text-muted); cursor:not-allowed; }
+  .field .computed-note{ font-size:11px; color:var(--text-muted); }
+  .field .optional-label{ display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .field .optional-label input[type=checkbox]{ width:15px; height:15px; accent-color:var(--accent); flex-shrink:0; }
+  .toggle-field{
+    display:flex; align-items:center; gap:8px; padding:11px 14px; border:1px solid var(--border);
+    border-radius:8px; background:var(--surface); cursor:pointer; font-size:14px; font-weight:600; color:var(--text);
+  }
+  .toggle-field input[type=checkbox]{ width:16px; height:16px; accent-color:var(--accent); flex-shrink:0; }
 
   .company-name-field input{ font-size:18px; padding:13px 15px; font-weight:600; }
 
@@ -345,6 +354,9 @@
     <div class="builder-section">
       <h2>2. 前提条件（単価・粗利率・販管費）</h2>
       <div class="hint">3プラン共通の前提です。物件王の標準的な数値を初期値として入れているので、必要な項目だけ書き換えてください。</div>
+      <div class="builder-subhead">取り扱う商品カテゴリ</div>
+      <div class="hint" style="margin-bottom:12px;">チェックを外すと、そのカテゴリは月別件数の入力欄・レポートの各表・売上構成グラフに表示されなくなります（仲介手数料・建築紹介は常に表示されます）。</div>
+      <div class="field-grid" id="categoryToggles" style="margin-bottom:18px;"></div>
       <div class="builder-subhead">売上参考数値</div>
       <div class="field-grid" id="masterSalesFields"></div>
       <div class="builder-subhead">販管費（月額・万円）</div>
@@ -406,32 +418,48 @@ const SALES_FIELD_DEFS = [
 
 const SGA_FIELD_DEFS = [
   {id:'office_support', label:'事務サポート給与', default:25},
-  {id:'welfare', label:'法定福利費', default:4},
+  {id:'sales_salary', label:'営業の給料', default:30},
+  {id:'welfare', label:'法定福利費', default:0, computed:true, computedNote:'事務サポート給与＋営業の給料 の16%'},
   {id:'bpo', label:'BPO費', default:0},
   {id:'ppc_ad', label:'PPC広告費用', default:20},
   {id:'ppc_support', label:'PPC広告運用サポート費用', default:0},
   {id:'rent', label:'地代家賃', default:0},
   {id:'misc', label:'雑費', default:10},
   {id:'growth_invest', label:'成長投資費', default:5},
+  {id:'agent_recruit', label:'宅建士の採用費用', default:20, optional:true},
 ];
+// 法定福利費の自動計算に使う対象（給与項目の合計 × 16%）
+const WELFARE_RATE = 0.16;
+const SALARY_SGA_IDS = ['office_support', 'sales_salary'];
 
 // 売上5カテゴリ（原価は新築・リフォーム・リノベーションのみ発生。仲介手数料・建築紹介は原価ゼロ）
+// 新築・リフォーム・リノベーションは取り扱わない会社もあるため、optional:true でチェックボックス
+// による表示/非表示を切り替えられるようにしている（仲介手数料・建築紹介は常時表示）。
 const CATEGORIES = [
   {key:'brokerage', label:'仲介手数料', countLabel:'仲介件数', unitField:'brokerage_unit', marginField:null},
-  {key:'newbuild', label:'新築', countLabel:'新築件数', unitField:'newbuild_unit', marginField:'newbuild_margin'},
-  {key:'reform', label:'リフォーム', countLabel:'リフォーム件数', unitField:'reform_unit', marginField:'reform_margin'},
-  {key:'renovation', label:'リノベーション', countLabel:'リノベーション件数', unitField:'renovation_unit', marginField:'renovation_margin'},
+  {key:'newbuild', label:'新築', countLabel:'新築件数', unitField:'newbuild_unit', marginField:'newbuild_margin', optional:true},
+  {key:'reform', label:'リフォーム', countLabel:'リフォーム件数', unitField:'reform_unit', marginField:'reform_margin', optional:true},
+  {key:'renovation', label:'リノベーション', countLabel:'リノベーション件数', unitField:'renovation_unit', marginField:'renovation_margin', optional:true},
   {key:'referral', label:'建築紹介', countLabel:'建築紹介件数', unitField:'referral_unit', marginField:null},
 ];
+// 実際に集計・表示の対象となるカテゴリ／販管費項目。チェックボックスの状態に応じて
+// computeReportData()の先頭で毎回作り直す（以降、計算・描画の各関数はこちらを参照する）。
+let CURRENT_CATEGORIES = CATEGORIES;
+let CURRENT_SGA_FIELDS = SGA_FIELD_DEFS;
+// 全プラン共通イニシャルコストのうち、チェックボックスで表示/非表示を切り替えるもの
+// （key -> 表示するかどうか）。非対象キー（INITIAL_COST_DEFS側）は常にtrue扱い。
+let CURRENT_INITIAL_VISIBLE = {};
 
 // プランごとに異なるイニシャルコスト
 const INITIAL_COST_DEFS = [
   {key:'intro', label:'物件王初期費用'},
   {key:'annual_fee', label:'物件王年会費'},
 ];
-// 全プラン共通のイニシャルコスト（1つ入力すれば全プランに反映される）
+// 全プラン共通のイニシャルコスト（1つ入力すれば全プランに反映される）。
+// 宅建業取得費用は不要な会社もあるため optional:true にし、チェックを入れた場合だけ
+// 金額を反映＆レポートの前提条件に表示する（未チェック時は項目自体を表示しない）。
 const SHARED_INITIAL_COST_DEFS = [
-  {key:'license', label:'宅建業取得費用', default:0},
+  {key:'license', label:'宅建業取得費用', default:0, optional:true},
 ];
 
 // 月別件数の初期値は、物件王の標準テンプレートExcel（損益計算書_株式会社テンプレート様）の
@@ -481,11 +509,43 @@ function readNum(id, fallback){
 }
 
 // ---- 1. 入力フォームの組み立て ----
+
+// 給与2項目（事務サポート給与＋営業の給料）の合計×16%を「法定福利費」欄に自動反映する。
+// 欄自体は編集不可（readonly/disabled）にし、常に計算結果を表示する。
+function recalcWelfareDisplay(){
+  const el = document.getElementById('master_sga_welfare');
+  if(!el) return;
+  const sum = SALARY_SGA_IDS.reduce((s,id)=> s + readNum(`master_sga_${id}`, 0), 0);
+  el.value = Math.round(sum * WELFARE_RATE * 10) / 10;
+}
+
+// チェックボックス付きのオン/オフ切り替え項目（宅建士の採用費用・宅建業取得費用）を
+// 共通の見た目で作る。チェックが入っている間だけ金額入力を編集可能にする。
+function buildOptionalField(checkboxId, inputId, label, defaultValue, unit){
+  return `
+    <div class="field">
+      <label class="optional-label" for="${checkboxId}">
+        <input type="checkbox" id="${checkboxId}">
+        ${label}
+      </label>
+      <div class="input-row">
+        <input type="number" id="${inputId}" value="${defaultValue}" step="1" min="0" disabled>
+        <span class="unit">${unit}</span>
+      </div>
+    </div>`;
+}
+function wireOptionalField(checkboxId, inputId){
+  const checkbox = document.getElementById(checkboxId);
+  const input = document.getElementById(inputId);
+  if(!checkbox || !input) return;
+  checkbox.addEventListener('change', ()=>{ input.disabled = !checkbox.checked; });
+}
+
 function buildMasterFields(){
   const salesWrap = document.getElementById('masterSalesFields');
   SALES_FIELD_DEFS.forEach(f=>{
     salesWrap.insertAdjacentHTML('beforeend', `
-      <div class="field">
+      <div class="field" data-field-id="${f.id}">
         <label>${f.label}</label>
         <div class="input-row">
           <input type="number" id="master_${f.id}" value="${f.default}" step="1" min="0">
@@ -493,8 +553,25 @@ function buildMasterFields(){
         </div>
       </div>`);
   });
+
   const sgaWrap = document.getElementById('masterSgaFields');
   SGA_FIELD_DEFS.forEach(f=>{
+    if(f.computed){
+      sgaWrap.insertAdjacentHTML('beforeend', `
+        <div class="field">
+          <label>${f.label}</label>
+          <div class="input-row">
+            <input type="number" id="master_sga_${f.id}" value="0" disabled>
+            <span class="unit">万円/月</span>
+          </div>
+          <div class="computed-note">自動計算（${f.computedNote}）</div>
+        </div>`);
+      return;
+    }
+    if(f.optional){
+      sgaWrap.insertAdjacentHTML('beforeend', buildOptionalField(`sga_enable_${f.id}`, `master_sga_${f.id}`, f.label, f.default, '万円/月'));
+      return;
+    }
     sgaWrap.insertAdjacentHTML('beforeend', `
       <div class="field">
         <label>${f.label}</label>
@@ -504,8 +581,21 @@ function buildMasterFields(){
         </div>
       </div>`);
   });
+  // 給与項目が変わるたびに法定福利費の自動計算を再表示する
+  SALARY_SGA_IDS.forEach(id=>{
+    const el = document.getElementById(`master_sga_${id}`);
+    if(el) el.addEventListener('input', recalcWelfareDisplay);
+  });
+  recalcWelfareDisplay();
+  SGA_FIELD_DEFS.filter(f=>f.optional).forEach(f=> wireOptionalField(`sga_enable_${f.id}`, `master_sga_${f.id}`));
+
   const sharedInitialWrap = document.getElementById('sharedInitialFields');
   SHARED_INITIAL_COST_DEFS.forEach(f=>{
+    if(f.optional){
+      sharedInitialWrap.insertAdjacentHTML('beforeend', buildOptionalField(`shared_initial_enable_${f.key}`, `shared_initial_${f.key}`, f.label, f.default, '万円'));
+      wireOptionalField(`shared_initial_enable_${f.key}`, `shared_initial_${f.key}`);
+      return;
+    }
     sharedInitialWrap.insertAdjacentHTML('beforeend', `
       <div class="field">
         <label>${f.label}</label>
@@ -515,6 +605,34 @@ function buildMasterFields(){
         </div>
       </div>`);
   });
+}
+
+// 新築・リフォーム・リノベーションのチェックボックス（取り扱う商品カテゴリ）を組み立てる。
+// チェックを外すと、対応する単価・粗利率の入力欄と、各プランの月別件数の行を非表示にする。
+function buildCategoryToggles(){
+  const wrap = document.getElementById('categoryToggles');
+  if(!wrap) return;
+  CATEGORIES.filter(c=>c.optional).forEach(cat=>{
+    wrap.insertAdjacentHTML('beforeend', `
+      <label class="toggle-field">
+        <input type="checkbox" id="cat_enable_${cat.key}" checked>
+        ${cat.label}
+      </label>`);
+  });
+  CATEGORIES.filter(c=>c.optional).forEach(cat=>{
+    const checkbox = document.getElementById(`cat_enable_${cat.key}`);
+    if(!checkbox) return;
+    checkbox.addEventListener('change', ()=> setCategoryFieldsVisible(cat.key, checkbox.checked));
+  });
+}
+function setCategoryFieldsVisible(catKey, visible){
+  const cat = CATEGORIES.find(c=>c.key===catKey);
+  if(!cat) return;
+  [cat.unitField, cat.marginField].filter(Boolean).forEach(fieldId=>{
+    const el = document.querySelector(`[data-field-id="${fieldId}"]`);
+    if(el) el.style.display = visible ? '' : 'none';
+  });
+  document.querySelectorAll(`tr[data-cat="${catKey}"]`).forEach(tr=>{ tr.style.display = visible ? '' : 'none'; });
 }
 
 function buildPlanBuilderUI(){
@@ -538,7 +656,7 @@ function buildPlanBuilderUI(){
     const monthRowsHtml = CATEGORIES.map(cat=>{
       const defaults = p.countDefaults[cat.key];
       const cells = defaults.map((v,idx)=>`<td><input type="number" id="plan_${p.slug}_count_${cat.key}_${idx+1}" value="${v}" step="1" min="0"></td>`).join('');
-      return `<tr><th>${cat.countLabel}</th>${cells}</tr>`;
+      return `<tr data-cat="${cat.key}"><th>${cat.countLabel}</th>${cells}</tr>`;
     }).join('');
 
     panelsWrap.insertAdjacentHTML('beforeend', `
@@ -579,10 +697,28 @@ function cumSum(arr){
   return out;
 }
 // 指定した月範囲[monthStart, monthEnd)（0始まり）の売上構成比を算出する
+// 現在チェックが入っている（＝表示対象の）カテゴリ・販管費項目・共通イニシャルコストを
+// DOMのチェックボックス状態から都度判定する。状態を別途JS変数として持たず、常にチェック
+// ボックスそのものを正とすることで、表示と計算がずれないようにしている。
+function activeCategories(){
+  return CATEGORIES.filter(c=>{
+    if(!c.optional) return true;
+    const checkbox = document.getElementById(`cat_enable_${c.key}`);
+    return checkbox ? checkbox.checked : true;
+  });
+}
+function activeSgaFields(){
+  return SGA_FIELD_DEFS.filter(f=>{
+    if(!f.optional) return true;
+    const checkbox = document.getElementById(`sga_enable_${f.id}`);
+    return checkbox ? checkbox.checked : false;
+  });
+}
+
 function computeComposition(salesByCat, monthStart, monthEnd){
-  const totals = CATEGORIES.map(cat=>salesByCat[cat.key].slice(monthStart, monthEnd).reduce((a,b)=>a+b,0));
+  const totals = CURRENT_CATEGORIES.map(cat=>salesByCat[cat.key].slice(monthStart, monthEnd).reduce((a,b)=>a+b,0));
   const grand = totals.reduce((a,b)=>a+b,0);
-  return CATEGORIES.map((cat,i)=>({
+  return CURRENT_CATEGORIES.map((cat,i)=>({
     label: cat.label,
     value: totals[i],
     pct: grand ? (totals[i] / grand * 100) : 0,
@@ -596,19 +732,42 @@ function readMaster(){
     m[f.id] = v;
   });
   m.sga = {};
-  SGA_FIELD_DEFS.forEach(f=>{ m.sga[f.id] = readNum(`master_sga_${f.id}`, f.default); });
+  CURRENT_SGA_FIELDS.forEach(f=>{
+    if(f.computed) return;
+    m.sga[f.id] = readNum(`master_sga_${f.id}`, f.default);
+  });
+  // 法定福利費は入力欄からではなく、給与2項目の合計×16%として都度計算する
+  // （画面上の自動計算表示とロジックを一致させる）。
+  if(CURRENT_SGA_FIELDS.some(f=>f.id === 'welfare')){
+    const salarySum = SALARY_SGA_IDS.reduce((s,id)=> s + (m.sga[id] || 0), 0);
+    m.sga.welfare = Math.round(salarySum * WELFARE_RATE * 10) / 10;
+  }
   return m;
 }
 
 function computeReportData(){
+  CURRENT_CATEGORIES = activeCategories();
+  CURRENT_SGA_FIELDS = activeSgaFields();
+
   const companyName = (document.getElementById('companyNameInput').value || '').trim() || '株式会社○○　御中';
   const master = readMaster();
   const chartByPlan = {};
   const plansViewList = [];
 
-  // 宅建業取得費用など、プランによらず共通のイニシャルコストは1箇所だけ読み取り、全プランに反映する
+  // 宅建業取得費用など、プランによらず共通のイニシャルコストは1箇所だけ読み取り、全プランに反映する。
+  // チェックが外れている項目は金額を0として扱い（＝損益計算には影響させず）、
+  // レポート上の表示も別途 CURRENT_INITIAL_VISIBLE を見て行を丸ごと省く。
+  CURRENT_INITIAL_VISIBLE = {};
   const sharedInitial = {};
-  SHARED_INITIAL_COST_DEFS.forEach(f=>{ sharedInitial[f.key] = readNum(`shared_initial_${f.key}`, f.default); });
+  SHARED_INITIAL_COST_DEFS.forEach(f=>{
+    let visible = true;
+    if(f.optional){
+      const checkbox = document.getElementById(`shared_initial_enable_${f.key}`);
+      visible = checkbox ? checkbox.checked : false;
+    }
+    CURRENT_INITIAL_VISIBLE[f.key] = visible;
+    sharedInitial[f.key] = visible ? readNum(`shared_initial_${f.key}`, f.default) : 0;
+  });
 
   PLAN_DEFS.forEach(p=>{
     const initial = { ...sharedInitial };
@@ -617,7 +776,7 @@ function computeReportData(){
     // 件数は「月別件数」表（24個の入力欄）から直接読み取る。
     // この表は自動生成ボタンで一括入力できるほか、1件ずつ手入力で書き換えられる。
     const countsByCat = {};
-    CATEGORIES.forEach(cat=>{
+    CURRENT_CATEGORIES.forEach(cat=>{
       const values = [];
       for(let m=1; m<=24; m++){
         values.push(Math.max(0, readNum(`plan_${p.slug}_count_${cat.key}_${m}`)));
@@ -626,7 +785,7 @@ function computeReportData(){
     });
 
     const salesByCat = {}, costByCat = {};
-    CATEGORIES.forEach(cat=>{
+    CURRENT_CATEGORIES.forEach(cat=>{
       const unit = master[cat.unitField];
       salesByCat[cat.key] = countsByCat[cat.key].map(c=>c*unit);
       if(cat.marginField){
@@ -637,10 +796,10 @@ function computeReportData(){
       }
     });
 
-    const salesTotal = sumArr(CATEGORIES.map(c=>salesByCat[c.key]));
-    const costTotal = sumArr(CATEGORIES.map(c=>costByCat[c.key]));
+    const salesTotal = sumArr(CURRENT_CATEGORIES.map(c=>salesByCat[c.key]));
+    const costTotal = sumArr(CURRENT_CATEGORIES.map(c=>costByCat[c.key]));
     const grossProfit = salesTotal.map((v,i)=>v - costTotal[i]);
-    const sgaMonthlyValue = SGA_FIELD_DEFS.reduce((s,f)=>s + master.sga[f.id], 0);
+    const sgaMonthlyValue = CURRENT_SGA_FIELDS.reduce((s,f)=>s + (master.sga[f.id]||0), 0);
     const sgaTotal = Array(24).fill(sgaMonthlyValue);
     const operatingProfit = grossProfit.map((v,i)=>v - sgaTotal[i]);
     // 累計損益：1〜24ヶ月を通して途切れず積み上がる累計にする。
@@ -734,13 +893,23 @@ function buildCellsAsBalance(monthsArr){
   cells.push(cellFor(monthsArr[23], true));
   return cells;
 }
+// 累計損益（＝イニシャルコスト差引後の累計）が初めて0以上になる月を「黒字転換」の
+// タイミングとする。累計損益は初期費用を差し引いた値なので、これは同時に
+// 「初期費用を回収し終えるタイミング」でもある。24ヶ月以内に到達しない場合はnull。
+function computeBreakEvenMonth(cumulativeProfit){
+  for(let i=0; i<cumulativeProfit.length; i++){
+    if(cumulativeProfit[i] >= 0) return i + 1;
+  }
+  return null;
+}
 function buildStats(p){
   const salesY1 = p.salesTotal.slice(0,12).reduce((a,b)=>a+b,0);
   const salesY2 = p.salesTotal.slice(12,24).reduce((a,b)=>a+b,0);
   const opY1 = p.operatingProfit.slice(0,12).reduce((a,b)=>a+b,0);
   const opY2 = p.operatingProfit.slice(12,24).reduce((a,b)=>a+b,0);
   const cumFinal = p.cumulativeProfit[23];
-  return { salesY1, salesY2, opY1, opY2, cumFinal };
+  const breakEvenMonth = computeBreakEvenMonth(p.cumulativeProfit);
+  return { salesY1, salesY2, opY1, opY2, cumFinal, breakEvenMonth };
 }
 // 売上構成比の凡例<li>群を組み立てる（computeComposition()が返す [{label,value,pct}, ...] 形式を受け取る）
 function buildCompositionLegendRows(comp){
@@ -754,15 +923,15 @@ function buildCompositionLegendRows(comp){
 }
 function buildTableSections(p){
   return [
-    {title:'売上件数内訳（件）', rows: CATEGORIES.map(cat=>({label:cat.countLabel, cells:buildCells(p.countsByCat[cat.key])}))},
-    {title:'売上内訳（万円）', rows: CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.salesByCat[cat.key])}))},
+    {title:'売上件数内訳（件）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.countLabel, cells:buildCells(p.countsByCat[cat.key])}))},
+    {title:'売上内訳（万円）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.salesByCat[cat.key])}))},
     {title:null, rows:[{label:'売上合計(A)', rowClass:'total-row', cells:buildCells(p.salesTotal)}]},
-    {title:'原価内訳（万円）', rows: CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.costByCat[cat.key])}))},
+    {title:'原価内訳（万円）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.costByCat[cat.key])}))},
     {title:null, rows:[
       {label:'原価合計(B)', rowClass:'total-row', cells:buildCells(p.costTotal)},
       {label:'粗利(A-B)', rowClass:'total-row', cells:buildCells(p.grossProfit)},
     ]},
-    {title:'販管費内訳（万円）', rows: SGA_FIELD_DEFS.map(f=>({label:f.label, cells:buildCells(Array(24).fill(p.sgaByItem[f.id]))}))},
+    {title:'販管費内訳（万円）', rows: CURRENT_SGA_FIELDS.map(f=>({label:f.label, cells:buildCells(Array(24).fill(p.sgaByItem[f.id]))}))},
     {title:null, rows:[
       {label:'販管費合計(C)', rowClass:'total-row', cells:buildCells(p.sgaTotal)},
       {label:'営業利益(A-B-C)', rowClass:'highlight-row', cells:buildCells(p.operatingProfit)},
@@ -778,7 +947,9 @@ function buildPlanPanelHTML(p, isActive){
 
   const compRows = buildCompositionLegendRows(p.compositionByRange['24']);
 
-  const initialRows = INITIAL_COST_DEFS.concat(SHARED_INITIAL_COST_DEFS).map(ic=>`
+  const initialRows = INITIAL_COST_DEFS.concat(SHARED_INITIAL_COST_DEFS)
+    .filter(ic => CURRENT_INITIAL_VISIBLE[ic.key] !== false)
+    .map(ic=>`
     <li><span class="a-label">${ic.label}</span><span class="a-value">${p.initial[ic.key] ? fmtNum(p.initial[ic.key]) + ' 万円' : '—'}</span></li>`).join('');
 
   const theadCells = headers.map(h=>`<th class="${h.isTotal ? 'year-total' : ''}">${h.label}</th>`).join('');
@@ -803,7 +974,7 @@ function buildPlanPanelHTML(p, isActive){
         <div class="stat"><div class="label">1年目 営業利益</div><div class="value ${stats.opY1<0?'neg':''}">${fmtNum(stats.opY1)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
         <div class="stat"><div class="label">2年目 売上合計</div><div class="value">${fmtNum(stats.salesY2)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
         <div class="stat"><div class="label">2年目 営業利益</div><div class="value ${stats.opY2<0?'neg':''}">${fmtNum(stats.opY2)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
-        <div class="stat"><div class="label">24ヶ月目 累計損益</div><div class="value ${stats.cumFinal<0?'neg':''}">${fmtNum(stats.cumFinal)} <span style="font-size:12px;font-weight:400;">万円</span></div><div class="sub">イニシャルコスト差引後</div></div>
+        <div class="stat"><div class="label">24ヶ月目 累計損益</div><div class="value ${stats.cumFinal<0?'neg':''}">${fmtNum(stats.cumFinal)} <span style="font-size:12px;font-weight:400;">万円</span></div><div class="sub">${stats.breakEvenMonth ? `${stats.breakEvenMonth}ヶ月目で黒字転換（初期費用回収）` : '24ヶ月以内は黒字転換なし'}</div></div>
       </div>
     </div>
 
@@ -858,12 +1029,19 @@ function buildReportHTML(data){
     `<div class="plan-tab${i===0 ? ' active' : ''}" data-plan="${p.key}">${escapeHtml(p.name)}プラン</div>`).join('');
   const panelsHtml = data.plansViewList.map((p,i)=>buildPlanPanelHTML(p, i===0)).join('');
 
-  const masterSalesHtml = SALES_FIELD_DEFS.map(f=>{
+  // 取り扱わないカテゴリ（チェックを外した新築・リフォーム・リノベーション）の単価・
+  // 粗利率は、前提条件パネルにも表示しない。
+  const inactiveFieldIds = new Set();
+  CATEGORIES.filter(c=>c.optional && !CURRENT_CATEGORIES.includes(c)).forEach(c=>{
+    if(c.unitField) inactiveFieldIds.add(c.unitField);
+    if(c.marginField) inactiveFieldIds.add(c.marginField);
+  });
+  const masterSalesHtml = SALES_FIELD_DEFS.filter(f=>!inactiveFieldIds.has(f.id)).map(f=>{
     const v = data.master[f.id];
     const valueStr = f.type === 'margin' ? `${(v*100).toFixed(0)}%` : `${fmtNum(v)} 万円`;
     return `<li><span class="a-label">${f.label}</span><span class="a-value">${valueStr}</span></li>`;
   }).join('');
-  const masterSgaHtml = SGA_FIELD_DEFS.map(f=>
+  const masterSgaHtml = CURRENT_SGA_FIELDS.map(f=>
     `<li><span class="a-label">${f.label}</span><span class="a-value">${fmtNum(data.master.sga[f.id])} 万円</span></li>`).join('');
 
   return `
@@ -1137,10 +1315,13 @@ function showExportStatus(message, isError){
 // プレーンなオブジェクトとして読み取る。書き出したHTMLを再度開いたときに
 // 同じ内容を入力フォームへ復元するために使う。
 function captureInputSnapshot(){
-  const snap = { companyName: document.getElementById('companyNameInput').value, master: {}, masterSga: {}, sharedInitial: {}, plans: {} };
+  const snap = { companyName: document.getElementById('companyNameInput').value, master: {}, masterSga: {}, sharedInitial: {}, categoryEnabled: {}, sgaEnabled: {}, sharedInitialEnabled: {}, plans: {} };
   SALES_FIELD_DEFS.forEach(f=>{ const el = document.getElementById(`master_${f.id}`); if(el) snap.master[f.id] = el.value; });
   SGA_FIELD_DEFS.forEach(f=>{ const el = document.getElementById(`master_sga_${f.id}`); if(el) snap.masterSga[f.id] = el.value; });
   SHARED_INITIAL_COST_DEFS.forEach(f=>{ const el = document.getElementById(`shared_initial_${f.key}`); if(el) snap.sharedInitial[f.key] = el.value; });
+  CATEGORIES.filter(c=>c.optional).forEach(c=>{ const el = document.getElementById(`cat_enable_${c.key}`); if(el) snap.categoryEnabled[c.key] = el.checked; });
+  SGA_FIELD_DEFS.filter(f=>f.optional).forEach(f=>{ const el = document.getElementById(`sga_enable_${f.id}`); if(el) snap.sgaEnabled[f.id] = el.checked; });
+  SHARED_INITIAL_COST_DEFS.filter(f=>f.optional).forEach(f=>{ const el = document.getElementById(`shared_initial_enable_${f.key}`); if(el) snap.sharedInitialEnabled[f.key] = el.checked; });
   PLAN_DEFS.forEach(p=>{
     const planSnap = { initial: {}, counts: {} };
     INITIAL_COST_DEFS.forEach(ic=>{ const el = document.getElementById(`plan_${p.slug}_initial_${ic.key}`); if(el) planSnap.initial[ic.key] = el.value; });
@@ -1162,10 +1343,31 @@ function captureInputSnapshot(){
 function applyInputSnapshot(snap){
   if(!snap) return;
   const setVal = (id, v) => { const el = document.getElementById(id); if(el && v !== undefined) el.value = v; };
+  const setChecked = (id, v) => { const el = document.getElementById(id); if(el && v !== undefined) el.checked = !!v; };
   setVal('companyNameInput', snap.companyName);
   if(snap.master) SALES_FIELD_DEFS.forEach(f=>setVal(`master_${f.id}`, snap.master[f.id]));
   if(snap.masterSga) SGA_FIELD_DEFS.forEach(f=>setVal(`master_sga_${f.id}`, snap.masterSga[f.id]));
   if(snap.sharedInitial) SHARED_INITIAL_COST_DEFS.forEach(f=>setVal(`shared_initial_${f.key}`, snap.sharedInitial[f.key]));
+  // チェックボックス群を復元し、それぞれの表示切り替え（行の表示/非表示、金額欄の
+  // 有効/無効）も合わせて反映する（setVal同様、値を書き戻すだけではUIが追従しないため）。
+  if(snap.categoryEnabled) CATEGORIES.filter(c=>c.optional).forEach(c=>{
+    if(snap.categoryEnabled[c.key] === undefined) return;
+    setChecked(`cat_enable_${c.key}`, snap.categoryEnabled[c.key]);
+    setCategoryFieldsVisible(c.key, snap.categoryEnabled[c.key]);
+  });
+  if(snap.sgaEnabled) SGA_FIELD_DEFS.filter(f=>f.optional).forEach(f=>{
+    if(snap.sgaEnabled[f.id] === undefined) return;
+    setChecked(`sga_enable_${f.id}`, snap.sgaEnabled[f.id]);
+    const input = document.getElementById(`master_sga_${f.id}`);
+    if(input) input.disabled = !snap.sgaEnabled[f.id];
+  });
+  if(snap.sharedInitialEnabled) SHARED_INITIAL_COST_DEFS.filter(f=>f.optional).forEach(f=>{
+    if(snap.sharedInitialEnabled[f.key] === undefined) return;
+    setChecked(`shared_initial_enable_${f.key}`, snap.sharedInitialEnabled[f.key]);
+    const input = document.getElementById(`shared_initial_${f.key}`);
+    if(input) input.disabled = !snap.sharedInitialEnabled[f.key];
+  });
+  recalcWelfareDisplay();
   if(snap.plans) PLAN_DEFS.forEach(p=>{
     const ps = snap.plans[p.slug];
     if(!ps) return;
@@ -1287,6 +1489,7 @@ async function exportStandaloneHtml(){
 
 // ---- 6. ページ初期化 ----
 buildMasterFields();
+buildCategoryToggles();
 buildPlanBuilderUI();
 
 document.getElementById('generateBtn').addEventListener('click', ()=>{
