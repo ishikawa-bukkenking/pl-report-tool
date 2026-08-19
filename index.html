@@ -464,7 +464,7 @@ const INITIAL_COST_DEFS = [
 // 一度きりの費用のため、販管費ではなくイニシャルコスト側に置いている。
 const SHARED_INITIAL_COST_DEFS = [
   {key:'license', label:'宅建業取得費用', default:0, optional:true},
-  {key:'agent_recruit', label:'宅建士の採用費用', default:20, optional:true},
+  {key:'agent_recruit', label:'宅建士の採用費用', default:100, optional:true},
 ];
 
 // 月別件数の初期値は、物件王の標準テンプレートExcel（損益計算書_株式会社テンプレート様）の
@@ -1493,8 +1493,23 @@ document.getElementById('backToBuilderBtn').addEventListener('click', ()=>{
 document.getElementById('exportHtmlBtn').addEventListener('click', exportStandaloneHtml);
 document.getElementById('downloadHtmlBtn').addEventListener('click', downloadReportHtml);
 document.getElementById('downloadPdfBtn').addEventListener('click', ()=>{
-  showExportStatus('印刷ダイアログが開きます（現在表示中のプランのみ出力されます）。印刷先を「PDFに保存」、向きを「横」にしてください。');
+  showExportStatus('印刷ダイアログが開きます（現在表示中のプランのみ出力されます）。印刷先を「PDFに保存」、向きを「横」に。上部のタイトルや下部のURL・ページ番号を消すには「詳細設定」→「ヘッダーとフッター」のチェックを外してください。');
   window.print();
+});
+
+// ブラウザ標準の印刷ヘッダー/フッター（左上の日付、中央上のページタイトル、左下のURL、
+// 右下のページ番号）は、ブラウザの印刷ダイアログ自体が付加するものでページ側のCSS/JSからは
+// 制御できない（消すには印刷ダイアログの「詳細設定」→「ヘッダーとフッター」のチェックを
+// 外す必要があり、これはユーザー操作でしかできない）。せめてページタイトル部分だけでも、
+// 常に固定の「損益計算書 作成ツール」ではなく、実際の会社名が表示されるように
+// 印刷直前だけdocument.titleを差し替えておく。
+window.addEventListener('beforeprint', function(){
+  window.__printTitleBackup = document.title;
+  const data = window.__lastReportData;
+  document.title = data && data.companyName ? `${data.companyName}_損益計算書` : '損益計算書';
+});
+window.addEventListener('afterprint', function(){
+  if(window.__printTitleBackup !== undefined){ document.title = window.__printTitleBackup; delete window.__printTitleBackup; }
 });
 </script>
 
