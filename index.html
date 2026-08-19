@@ -275,7 +275,10 @@
 
   /* ---- 印刷／PDF保存用 ----
      「PDFでダウンロード」はブラウザ標準の印刷機能（印刷先を「PDFに保存」）を使う。
-     印刷時は入力画面・ツールバー・タブを隠し、3プランすべてを1プランずつ改ページして出力する。 */
+     印刷時は入力画面・ツールバー・タブを隠し、その時点で開いている（選択中の）プランだけを
+     出力する（3プラン分すべてを毎回出したいわけではなく、必要なプランだけ渡したい場面が
+     多いため）。他のプラン（.plan-panel:not(.active)）は画面表示時と同じくdisplay:noneの
+     ままにする＝印刷対象は自然と.active一つだけになる。 */
   @page{ size:A4 landscape; margin:10mm; }
   @media print{
     /* 既定では背景色・背景画像を印刷しないブラウザが多く、紺色の見出しやハイライト行に
@@ -294,11 +297,7 @@
     .header .title-main{ font-size:22px !important; }
 
     .plan-tabs{ display:none !important; }
-    .plan-panel{ display:block !important; padding:4mm 4mm 0; }
-    /* :first-of-type は「div要素として何番目か」で判定されるため、直前に他のdivが
-       あると先頭の.plan-panelにも一致せず、印刷結果の先頭に空白ページができてしまう。
-       兄弟結合子で「直前に.plan-panelがある.plan-panel」だけを改ページ対象にする。 */
-    .plan-panel ~ .plan-panel{ page-break-before:always; break-before:page; }
+    .plan-panel.active{ padding:4mm 4mm 0; }
 
     .card{
       break-inside:avoid; page-break-inside:avoid; box-shadow:none;
@@ -357,6 +356,8 @@
       <div class="builder-subhead">取り扱う商品カテゴリ</div>
       <div class="hint" style="margin-bottom:12px;">チェックを外すと、そのカテゴリは月別件数の入力欄・レポートの各表・売上構成グラフに表示されなくなります（仲介手数料・建築紹介は常に表示されます）。</div>
       <div class="field-grid" id="categoryToggles" style="margin-bottom:18px;"></div>
+      <div class="builder-subhead">レポート表示オプション</div>
+      <div class="field-grid" id="displayToggles" style="margin-bottom:18px;"></div>
       <div class="builder-subhead">売上参考数値</div>
       <div class="field-grid" id="masterSalesFields"></div>
       <div class="builder-subhead">販管費（月額・万円）</div>
@@ -418,15 +419,14 @@ const SALES_FIELD_DEFS = [
 
 const SGA_FIELD_DEFS = [
   {id:'office_support', label:'事務サポート給与', default:25},
-  {id:'sales_salary', label:'営業の給料', default:30},
-  {id:'welfare', label:'法定福利費', default:0, computed:true, computedNote:'事務サポート給与＋営業の給料 の16%'},
+  {id:'sales_salary', label:'営業給与', default:30},
+  {id:'welfare', label:'法定福利費', default:0, computed:true, computedNote:'事務サポート給与＋営業給与 の16%'},
   {id:'bpo', label:'BPO費', default:0},
   {id:'ppc_ad', label:'PPC広告費用', default:20},
   {id:'ppc_support', label:'PPC広告運用サポート費用', default:0},
   {id:'rent', label:'地代家賃', default:0},
   {id:'misc', label:'雑費', default:10},
   {id:'growth_invest', label:'成長投資費', default:5},
-  {id:'agent_recruit', label:'宅建士の採用費用', default:20, optional:true},
 ];
 // 法定福利費の自動計算に使う対象（給与項目の合計 × 16%）
 const WELFARE_RATE = 0.16;
@@ -449,6 +449,8 @@ let CURRENT_SGA_FIELDS = SGA_FIELD_DEFS;
 // 全プラン共通イニシャルコストのうち、チェックボックスで表示/非表示を切り替えるもの
 // （key -> 表示するかどうか）。非対象キー（INITIAL_COST_DEFS側）は常にtrue扱い。
 let CURRENT_INITIAL_VISIBLE = {};
+// 「売上構成比グラフを表示する」チェックボックスの状態。computeReportData()の先頭で反映する。
+let CURRENT_SHOW_COMPOSITION = true;
 
 // プランごとに異なるイニシャルコスト
 const INITIAL_COST_DEFS = [
@@ -456,10 +458,13 @@ const INITIAL_COST_DEFS = [
   {key:'annual_fee', label:'物件王年会費'},
 ];
 // 全プラン共通のイニシャルコスト（1つ入力すれば全プランに反映される）。
-// 宅建業取得費用は不要な会社もあるため optional:true にし、チェックを入れた場合だけ
-// 金額を反映＆レポートの前提条件に表示する（未チェック時は項目自体を表示しない）。
+// 宅建業取得費用・宅建士の採用費用は不要な会社もあるため optional:true にし、チェックを
+// 入れた場合だけ金額を反映＆レポートの前提条件（イニシャルコスト）に表示する
+// （未チェック時は項目自体を表示しない）。宅建士の採用費用は毎月かかる費用ではなく
+// 一度きりの費用のため、販管費ではなくイニシャルコスト側に置いている。
 const SHARED_INITIAL_COST_DEFS = [
   {key:'license', label:'宅建業取得費用', default:0, optional:true},
+  {key:'agent_recruit', label:'宅建士の採用費用', default:20, optional:true},
 ];
 
 // 月別件数の初期値は、物件王の標準テンプレートExcel（損益計算書_株式会社テンプレート様）の
@@ -635,6 +640,22 @@ function setCategoryFieldsVisible(catKey, visible){
   document.querySelectorAll(`tr[data-cat="${catKey}"]`).forEach(tr=>{ tr.style.display = visible ? '' : 'none'; });
 }
 
+// レポートの「売上構成比」カード（円グラフ＋凡例）自体を出す/出さないの切り替え。
+// カテゴリの選択（取り扱う商品カテゴリ）とは別軸で、グラフのセクションごと不要な会社向け。
+function buildDisplayToggles(){
+  const wrap = document.getElementById('displayToggles');
+  if(!wrap) return;
+  wrap.insertAdjacentHTML('beforeend', `
+    <label class="toggle-field">
+      <input type="checkbox" id="show_composition_chart" checked>
+      売上構成比グラフを表示する
+    </label>`);
+}
+function showCompositionChartEnabled(){
+  const checkbox = document.getElementById('show_composition_chart');
+  return checkbox ? checkbox.checked : true;
+}
+
 function buildPlanBuilderUI(){
   const tabsWrap = document.getElementById('builderPlanTabs');
   const panelsWrap = document.getElementById('builderPlanPanels');
@@ -748,6 +769,7 @@ function readMaster(){
 function computeReportData(){
   CURRENT_CATEGORIES = activeCategories();
   CURRENT_SGA_FIELDS = activeSgaFields();
+  CURRENT_SHOW_COMPOSITION = showCompositionChartEnabled();
 
   const companyName = (document.getElementById('companyNameInput').value || '').trim() || '株式会社○○　御中';
   const master = readMaster();
@@ -947,6 +969,28 @@ function buildPlanPanelHTML(p, isActive){
 
   const compRows = buildCompositionLegendRows(p.compositionByRange['24']);
 
+  // 黒字転換（＝初期費用回収）のタイミングを表すスタットカード用の表示テキスト。
+  // 「累計損益」の実額は出さず、いつ黒字化するかだけを分かりやすく伝える。
+  const hasBreakEven = !!stats.breakEvenMonth;
+  const breakEvenValueHtml = hasBreakEven
+    ? `${stats.breakEvenMonth}<span style="font-size:12px;font-weight:400;">ヶ月目</span>`
+    : '—';
+  const breakEvenSub = hasBreakEven ? '初期費用を回収' : '24ヶ月以内は黒字転換なし';
+
+  const compositionCardHtml = CURRENT_SHOW_COMPOSITION ? `
+    <div class="card">
+      <h2>売上構成比</h2>
+      <div class="chart-controls" style="margin-bottom:16px;">
+        <button class="comp-range-btn" data-range="12a">1年目</button>
+        <button class="comp-range-btn" data-range="12b">2年目</button>
+        <button class="comp-range-btn active" data-range="24">2年間累計</button>
+      </div>
+      <div class="composition-layout">
+        <div class="composition-chart-wrap"><canvas id="pie-${p.key}"></canvas></div>
+        <ul class="composition-legend" id="comp-legend-${p.key}">${compRows}</ul>
+      </div>
+    </div>` : '';
+
   const initialRows = INITIAL_COST_DEFS.concat(SHARED_INITIAL_COST_DEFS)
     .filter(ic => CURRENT_INITIAL_VISIBLE[ic.key] !== false)
     .map(ic=>`
@@ -974,23 +1018,10 @@ function buildPlanPanelHTML(p, isActive){
         <div class="stat"><div class="label">1年目 営業利益</div><div class="value ${stats.opY1<0?'neg':''}">${fmtNum(stats.opY1)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
         <div class="stat"><div class="label">2年目 売上合計</div><div class="value">${fmtNum(stats.salesY2)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
         <div class="stat"><div class="label">2年目 営業利益</div><div class="value ${stats.opY2<0?'neg':''}">${fmtNum(stats.opY2)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
-        <div class="stat"><div class="label">24ヶ月目 累計損益</div><div class="value ${stats.cumFinal<0?'neg':''}">${fmtNum(stats.cumFinal)} <span style="font-size:12px;font-weight:400;">万円</span></div><div class="sub">${stats.breakEvenMonth ? `${stats.breakEvenMonth}ヶ月目で黒字転換（初期費用回収）` : '24ヶ月以内は黒字転換なし'}</div></div>
+        <div class="stat"><div class="label">黒字転換のタイミング</div><div class="value ${hasBreakEven?'':'neg'}">${breakEvenValueHtml}</div><div class="sub">${breakEvenSub}</div></div>
       </div>
     </div>
-
-    <div class="card">
-      <h2>売上構成比</h2>
-      <div class="chart-controls" style="margin-bottom:16px;">
-        <button class="comp-range-btn" data-range="12a">1年目</button>
-        <button class="comp-range-btn" data-range="12b">2年目</button>
-        <button class="comp-range-btn active" data-range="24">2年間累計</button>
-      </div>
-      <div class="composition-layout">
-        <div class="composition-chart-wrap"><canvas id="pie-${p.key}"></canvas></div>
-        <ul class="composition-legend" id="comp-legend-${p.key}">${compRows}</ul>
-      </div>
-    </div>
-
+    ${compositionCardHtml}
     <div class="card">
       <h2>累計推移グラフ</h2>
       <div class="chart-controls">
@@ -1164,66 +1195,13 @@ function REPORT_JS(){
   }
   REPORT_DATA.plan_keys.forEach(initCompositionChart);
 
-  // 印刷時にグラフのcanvasがズレる／欠ける不具合の原因は、印刷用CSSでグラフの
-  // 入れ物のサイズを画面表示時から変更し、そのあとJS側でChart.jsのresize()を
-  // 呼んで追従させようとしていたこと（resize()やResizeObserverの実行タイミングが
-  // ブラウザ／印刷パイプラインによって不安定で、実機・検証環境の双方でグラフが
-  // 欠けたり隣の要素と重なったりする不具合を確認済み）。そのため方針を変更し、
-  // グラフの入れ物は印刷時も画面表示時と同じサイズのまま変えないようにした
-  // （CSS側 `.composition-chart-wrap, .chart-wrap{ break-inside:avoid; }` 参照）。
-  // サイズが変わらない以上リサイズ自体が不要になり、この手のタイミング問題が
-  // 構造的に起きなくなる。
-  //
-  // ただし別の原因でグラフが「消える」不具合が残っている：非表示中のプランタブ
-  // （.plan-panel.active以外）はdisplay:noneのままグラフが初期化されるため、
-  // Chart.jsがコンテナのサイズを0×0だと認識してしまい、空のグラフになる
-  // （画面上はタブを一度でも開けば直る＝resizeActiveChart()で解消するが、
-  // 一度も開いていないタブのまま印刷すると空白のまま出力されてしまう）。
-  //
-  // 一度0×0で初期化されたグラフは、あとからコンテナを表示状態にして
-  // chart.resize()を呼んでも直らない（実機・検証環境の両方で確認済み。
-  // Chart.js内部のサイズ検知がResizeObserverの非同期コールバックに依存して
-  // おり、印刷直前のタイミングではそのコールバックが間に合わない/発火しない
-  // ケースがあるため）。そのため resize() では直さず、0×0のままの
-  // グラフだけ一旦破棄して、既に表示状態になったコンテナの上で作り直す
-  // （新規作成時のサイズ測定は同期的に行われるため確実に正しいサイズになる）。
-  function fixHiddenPlanChartsForPrint(){
-    document.querySelectorAll('.plan-panel').forEach(function(p){ p.dataset.printForcedVisible = p.classList.contains('active') ? '' : '1'; if(!p.classList.contains('active')) p.style.display = 'block'; });
-    // 強制的にレイアウトを確定させてから読む（同期リフローの強制）。
-    void document.body.offsetHeight;
-    REPORT_DATA.plan_keys.forEach(function(k){
-      const lineState = charts[k];
-      if(lineState && lineState.chart && (lineState.chart.width === 0 || lineState.chart.height === 0)){
-        lineState.chart.destroy();
-        initChartForPlan(k);
-      }
-      const compState = compositionCharts[k];
-      if(compState && compState.chart && (compState.chart.width === 0 || compState.chart.height === 0)){
-        // 一度も開いていないタブの構成比チャートは、ユーザーが範囲ボタン
-        // （1年目/2年目/2年間累計）を操作しようがないため、常に初期値の
-        // '24'（2年間累計）のまま。initCompositionChart()はそれで作り直す。
-        compState.chart.destroy();
-        initCompositionChart(k);
-      }
-    });
-  }
-  function restoreHiddenPlanPanels(){
-    document.querySelectorAll('.plan-panel').forEach(function(p){
-      if(p.dataset.printForcedVisible === '1'){ p.style.display = ''; }
-      delete p.dataset.printForcedVisible;
-    });
-  }
-  // 「生成する」を押し直すたびにREPORT_JS()が再実行され、charts/compositionChartsは
-  // その都度新しいクロージャで作り直される。単純にaddEventListenerするだけだと
-  // 前回生成時点の（既にDOMから外れた）古いチャートを掴んだままのリスナーが
-  // 積み重なってしまうため、前回登録分を明示的に外してから登録し直す。
-  if(window.__printFixListeners){
-    window.removeEventListener('beforeprint', window.__printFixListeners.before);
-    window.removeEventListener('afterprint', window.__printFixListeners.after);
-  }
-  window.__printFixListeners = { before: fixHiddenPlanChartsForPrint, after: restoreHiddenPlanPanels };
-  window.addEventListener('beforeprint', fixHiddenPlanChartsForPrint);
-  window.addEventListener('afterprint', restoreHiddenPlanPanels);
+  // 印刷（PDFダウンロード）は現在開いている（選択中の）プランタブだけを出力する方針にした
+  // （@media print側で .plan-panel.active 以外は画面表示時と同じくdisplay:noneのまま）。
+  // 印刷対象は常にユーザーが実際に開いたことのあるパネルなので、そのグラフはタブを開いた
+  // 時点で正しいサイズで初期化済み（resizeActiveChart()）。かつては非表示の他プランも
+  // 強制的に印刷対象へ含めていたため、一度もタブを開いていないプランのグラフが
+  // サイズ0のまま印刷されて欠ける不具合があり、そのための復旧処理が別途必要だったが、
+  // 「開いているプランだけ印刷する」方針にしたことでその種の不具合自体が起こらなくなった。
 
   function updateCompositionChart(planKey){
     const state = compositionCharts[planKey];
@@ -1322,6 +1300,7 @@ function captureInputSnapshot(){
   CATEGORIES.filter(c=>c.optional).forEach(c=>{ const el = document.getElementById(`cat_enable_${c.key}`); if(el) snap.categoryEnabled[c.key] = el.checked; });
   SGA_FIELD_DEFS.filter(f=>f.optional).forEach(f=>{ const el = document.getElementById(`sga_enable_${f.id}`); if(el) snap.sgaEnabled[f.id] = el.checked; });
   SHARED_INITIAL_COST_DEFS.filter(f=>f.optional).forEach(f=>{ const el = document.getElementById(`shared_initial_enable_${f.key}`); if(el) snap.sharedInitialEnabled[f.key] = el.checked; });
+  { const el = document.getElementById('show_composition_chart'); if(el) snap.showCompositionChart = el.checked; }
   PLAN_DEFS.forEach(p=>{
     const planSnap = { initial: {}, counts: {} };
     INITIAL_COST_DEFS.forEach(ic=>{ const el = document.getElementById(`plan_${p.slug}_initial_${ic.key}`); if(el) planSnap.initial[ic.key] = el.value; });
@@ -1367,6 +1346,7 @@ function applyInputSnapshot(snap){
     const input = document.getElementById(`shared_initial_${f.key}`);
     if(input) input.disabled = !snap.sharedInitialEnabled[f.key];
   });
+  if(snap.showCompositionChart !== undefined) setChecked('show_composition_chart', snap.showCompositionChart);
   recalcWelfareDisplay();
   if(snap.plans) PLAN_DEFS.forEach(p=>{
     const ps = snap.plans[p.slug];
@@ -1490,6 +1470,7 @@ async function exportStandaloneHtml(){
 // ---- 6. ページ初期化 ----
 buildMasterFields();
 buildCategoryToggles();
+buildDisplayToggles();
 buildPlanBuilderUI();
 
 document.getElementById('generateBtn').addEventListener('click', ()=>{
@@ -1512,7 +1493,7 @@ document.getElementById('backToBuilderBtn').addEventListener('click', ()=>{
 document.getElementById('exportHtmlBtn').addEventListener('click', exportStandaloneHtml);
 document.getElementById('downloadHtmlBtn').addEventListener('click', downloadReportHtml);
 document.getElementById('downloadPdfBtn').addEventListener('click', ()=>{
-  showExportStatus('印刷ダイアログが開きます。印刷先を「PDFに保存」、向きを「横」にしてください。');
+  showExportStatus('印刷ダイアログが開きます（現在表示中のプランのみ出力されます）。印刷先を「PDFに保存」、向きを「横」にしてください。');
   window.print();
 });
 </script>
