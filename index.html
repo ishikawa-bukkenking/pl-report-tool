@@ -263,6 +263,24 @@
     .header h1{ font-size:20px; }
     .card, .builder-section{ padding:16px; }
   }
+
+  /* ---- 印刷／PDF保存用 ----
+     「PDFでダウンロード」はブラウザ標準の印刷機能（印刷先を「PDFに保存」）を使う。
+     印刷時は入力画面・ツールバー・タブを隠し、3プランすべてを1プランずつ改ページして出力する。 */
+  @page{ size:A4 landscape; margin:12mm; }
+  @media print{
+    #builder-view, .report-toolbar, #exportStatus{ display:none !important; }
+    body{ background:#fff; }
+    .plan-tabs{ display:none !important; }
+    .plan-panel{ display:block !important; page-break-before:always; break-before:page; }
+    .plan-panel:first-of-type{ page-break-before:auto; break-before:auto; }
+    .card{ break-inside:avoid; box-shadow:none; }
+    .chart-wrap, .composition-chart-wrap{ break-inside:avoid; }
+    .table-scroll{ overflow:visible !important; border:none; }
+    table{ min-width:0 !important; font-size:9px; }
+    thead th{ position:static; }
+    tbody th{ position:static; }
+  }
 </style>
 </head>
 <body>
@@ -314,6 +332,7 @@
     <span id="exportStatus" style="font-size:12.5px; align-self:center; opacity:0; transition:opacity .3s ease;"></span>
     <button class="btn-secondary" id="backToBuilderBtn">← 入力に戻る</button>
     <button class="btn-secondary" id="downloadHtmlBtn">HTMLファイルをダウンロード</button>
+    <button class="btn-secondary" id="downloadPdfBtn">PDFでダウンロード</button>
     <button class="btn-secondary" id="exportHtmlBtn">この内容を保存する</button>
   </div>
   <div id="report-root"></div>
@@ -325,6 +344,13 @@
    ExcelなしでブラウザだけでPL（損益計算書）レポートを組み立てるための単一HTMLツール。
    入力フォーム → 計算 → レポート描画 → （任意で）単体HTMLとして書き出し、の流れ。
    ========================================================================== */
+
+// このスクリプトが実行され始めた時点（＝入力フォームがまだ何も生成・入力されていない、
+// ファイルそのままの状態）でのページ全体のHTMLを保存しておく。
+// 「単体HTMLとして保存」する際、この“まっさら”な状態のツール本体一式に、今の入力値の
+// スナップショットを埋め込んで書き出すことで、保存したHTMLを開いても
+// 「編集する」→ 入力フォームに戻って値を直せる、という一連の操作ができるようにする。
+const PRISTINE_HTML = document.documentElement.outerHTML;
 
 // ---- マスター項目の定義 ----
 const SALES_FIELD_DEFS = [
@@ -1006,49 +1032,66 @@ function showExportStatus(message, isError){
   showExportStatus._t = setTimeout(()=>{ el.style.opacity = '0'; }, 4000);
 }
 
+// 現在の全入力値（会社名・前提条件・プラン別イニシャルコスト・月別件数）を
+// プレーンなオブジェクトとして読み取る。書き出したHTMLを再度開いたときに
+// 同じ内容を入力フォームへ復元するために使う。
+function captureInputSnapshot(){
+  const snap = { companyName: document.getElementById('companyNameInput').value, master: {}, masterSga: {}, sharedInitial: {}, plans: {} };
+  SALES_FIELD_DEFS.forEach(f=>{ const el = document.getElementById(`master_${f.id}`); if(el) snap.master[f.id] = el.value; });
+  SGA_FIELD_DEFS.forEach(f=>{ const el = document.getElementById(`master_sga_${f.id}`); if(el) snap.masterSga[f.id] = el.value; });
+  SHARED_INITIAL_COST_DEFS.forEach(f=>{ const el = document.getElementById(`shared_initial_${f.key}`); if(el) snap.sharedInitial[f.key] = el.value; });
+  PLAN_DEFS.forEach(p=>{
+    const planSnap = { initial: {}, counts: {} };
+    INITIAL_COST_DEFS.forEach(ic=>{ const el = document.getElementById(`plan_${p.slug}_initial_${ic.key}`); if(el) planSnap.initial[ic.key] = el.value; });
+    CATEGORIES.forEach(cat=>{
+      const arr = [];
+      for(let m=1; m<=24; m++){
+        const el = document.getElementById(`plan_${p.slug}_count_${cat.key}_${m}`);
+        arr.push(el ? el.value : '0');
+      }
+      planSnap.counts[cat.key] = arr;
+    });
+    snap.plans[p.slug] = planSnap;
+  });
+  return snap;
+}
+
+// captureInputSnapshot() で作ったスナップショットを、入力フォームの各項目へ書き戻す。
+// 保存済みHTMLを開いたときの「値の復元」と、（将来的な用途があれば）他の場面でも使える。
+function applyInputSnapshot(snap){
+  if(!snap) return;
+  const setVal = (id, v) => { const el = document.getElementById(id); if(el && v !== undefined) el.value = v; };
+  setVal('companyNameInput', snap.companyName);
+  if(snap.master) SALES_FIELD_DEFS.forEach(f=>setVal(`master_${f.id}`, snap.master[f.id]));
+  if(snap.masterSga) SGA_FIELD_DEFS.forEach(f=>setVal(`master_sga_${f.id}`, snap.masterSga[f.id]));
+  if(snap.sharedInitial) SHARED_INITIAL_COST_DEFS.forEach(f=>setVal(`shared_initial_${f.key}`, snap.sharedInitial[f.key]));
+  if(snap.plans) PLAN_DEFS.forEach(p=>{
+    const ps = snap.plans[p.slug];
+    if(!ps) return;
+    if(ps.initial) INITIAL_COST_DEFS.forEach(ic=>setVal(`plan_${p.slug}_initial_${ic.key}`, ps.initial[ic.key]));
+    if(ps.counts) CATEGORIES.forEach(cat=>{
+      const arr = ps.counts[cat.key];
+      if(!arr) return;
+      for(let m=1; m<=24; m++){ setVal(`plan_${p.slug}_count_${cat.key}_${m}`, arr[m-1]); }
+    });
+  });
+}
+
+// 単体HTMLとして書き出す＝「まっさらなツール本体一式（PRISTINE_HTML）」に、
+// 今の入力値のスナップショットを埋め込んだもの。そのため書き出したファイルを開くと、
+// レポート画面がそのまま表示され（元のページと同じ表示状態を引き継ぐ）、
+// 「← 入力に戻る」を押せば同じ内容が入力フォームに復元されている＝編集して再生成できる。
 function buildStandaloneExportHtml(data){
-  const css = document.querySelector('style').innerHTML;
-  const bodyContent = document.getElementById('report-root').innerHTML;
-  const reportDataJson = JSON.stringify({ plan_keys: data.plansViewList.map(p=>p.key), plans: data.plans });
   const companyNameEsc = escapeHtml(data.companyName);
-  const safeName = data.companyName.replace(/[\\/:*?"<>|]/g, '') || 'report';
-  const downloadFileName = `損益計算書_${safeName}.html`;
-  // 単体HTMLとして書き出す版には、元のツール画面の「保存ボタン」群（report-toolbar）が
-  // 含まれない（report-root の中身しか持ち出していないため）。スプレッドシート経由で
-  // 開いたときにも手元に保存できるよう、このファイル自身にも簡易的なダウンロードボタンを
-  // 付けておく（クリック時点のDOMをそのまま書き出すだけの自己完結ボタン）。
-  return `<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${companyNameEsc} 損益計算書</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"><\/script>
-<style>${css}</style>
-</head>
-<body>
-<div class="report-toolbar" style="position:sticky; top:0; z-index:50; background:var(--bg);">
-  <button class="btn-secondary" id="standaloneDownloadBtn">このページをHTMLファイルとして保存</button>
-</div>
-<div id="report-root">${bodyContent}</div>
-<script>
-const REPORT_DATA = ${reportDataJson};
-(${REPORT_JS.toString()})();
-document.getElementById('standaloneDownloadBtn').addEventListener('click', function(){
-  const html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
-  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = ${JSON.stringify(downloadFileName)};
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
-});
-<\/script>
-</body>
-</html>`;
+  const snapshotJson = JSON.stringify(captureInputSnapshot());
+  let html = PRISTINE_HTML.replace(/<title>[^<]*<\/title>/, `<title>${companyNameEsc} 損益計算書</title>`);
+  const bootScript = `<script>\napplyInputSnapshot(${snapshotJson});\ndocument.getElementById('generateBtn').click();\n<\/script>\n`;
+  // .replace('</body>', ...) は使わない：この関数自身のソースコードが（PRISTINE_HTMLの一部として）
+  // 文字列リテラル "</body>" を含んでおり、先にそちらにマッチしてスクリプトが壊れてしまうため、
+  // 実際に最後に現れる（＝本物の）閉じタグの位置を明示的に探して差し込む。
+  const bodyCloseIdx = html.lastIndexOf('</body>');
+  html = html.slice(0, bodyCloseIdx) + bootScript + html.slice(bodyCloseIdx);
+  return '<!DOCTYPE html>\n' + html;
 }
 
 // ---- スプレッドシート連携 ----
@@ -1164,6 +1207,10 @@ document.getElementById('backToBuilderBtn').addEventListener('click', ()=>{
 
 document.getElementById('exportHtmlBtn').addEventListener('click', exportStandaloneHtml);
 document.getElementById('downloadHtmlBtn').addEventListener('click', downloadReportHtml);
+document.getElementById('downloadPdfBtn').addEventListener('click', ()=>{
+  showExportStatus('印刷ダイアログが開きます。印刷先を「PDFに保存」、向きを「横」にしてください。');
+  window.print();
+});
 </script>
 
 </body>
