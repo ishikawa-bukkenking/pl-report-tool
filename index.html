@@ -104,6 +104,7 @@
     line-height:1.6;
   }
   .header{
+    position:relative;
     background:linear-gradient(135deg,var(--navy) 0%,var(--navy-light) 100%);
     color:#fff;
     padding:32px 24px 28px;
@@ -113,6 +114,7 @@
   .header h1{ margin:0 0 2px; font-size:19px; font-weight:500; opacity:.92; }
   .header .title-main{ font-size:30px; font-weight:700; letter-spacing:.02em; margin-bottom:6px; }
   .header .sub{ font-size:13px; opacity:.8; max-width:640px; }
+  .header .tax-note{ position:absolute; top:14px; right:20px; font-size:11px; opacity:.7; }
   .container{ max-width:1200px; margin:0 auto; padding:24px; }
 
   .plan-tabs{ display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
@@ -198,6 +200,7 @@
   .assumptions-list li{ display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed var(--border); font-size:13px; }
   .assumptions-list li .a-label{ color:var(--text-muted); }
   .assumptions-list li .a-value{ font-weight:700; color:var(--heading); }
+  .assumptions-list li .a-value.neg{ color:var(--neg); }
 
   .plan-panel{ display:none; }
   .plan-panel.active{ display:block; }
@@ -295,6 +298,7 @@
     .container{ max-width:none !important; padding:0 !important; margin:0 !important; }
     .header{ padding:14px 4mm 12px !important; }
     .header .title-main{ font-size:22px !important; }
+    .header .tax-note{ top:6px !important; right:4mm !important; }
 
     .plan-tabs{ display:none !important; }
     .plan-panel.active{ padding:4mm 4mm 0; }
@@ -364,6 +368,9 @@
       <div class="field-grid" id="masterSgaFields"></div>
       <div class="builder-subhead">その他費用（全プラン共通）</div>
       <div class="field-grid" id="sharedInitialFields"></div>
+      <div class="builder-subhead">補助金・助成金</div>
+      <div class="hint" style="margin-bottom:12px;">活用する場合はチェックしてください。イニシャルコストから控除額が差し引かれ、申請サポート費用が加算されます（全プラン共通）。</div>
+      <div class="field-grid" id="subsidyFields"></div>
     </div>
 
     <div class="builder-section">
@@ -466,6 +473,19 @@ const SHARED_INITIAL_COST_DEFS = [
   {key:'license', label:'宅建業取得費用', default:0, optional:true},
   {key:'agent_recruit', label:'宅建士の採用費用', default:100, optional:true},
 ];
+
+// 補助金・助成金（全プラン共通・チェックボックスで有効化）。どちらも金額は固定額（助成金の
+// 控除額のみ人数に比例）のため、金額入力欄は持たずチェック（＋助成金は人数）だけで決まる。
+// イニシャルコストからの控除はマイナス値として扱い、申請サポート費用はプラス値として扱う
+// （どちらも computeReportData() 側で sharedInitial に同じキー体系で合算される）。
+const SUBSIDY_GRANT_DEDUCTION = 150;      // デジタル化・AI導入補助金による控除（万円）
+const SUBSIDY_GRANT_SUPPORT_FEE = 10;     // 補助金申請サポート費用・成果報酬（万円）
+const SUBSIDY_GRANT_LABEL = 'デジタル化・AI導入補助金';
+const EMPLOYMENT_GRANT_PER_PERSON = 21.6; // 助成金：対象人数×21.6万円（=216,000円）が控除される
+const EMPLOYMENT_GRANT_SUPPORT_FEE = 53.6;// 助成金申請サポート費用（万円、=536,000円、人数によらず固定）
+// レポートの「イニシャルコスト」に表示する項目定義。computeReportData()の先頭で
+// チェックボックスの状態に応じて毎回作り直す（項目自体が存在しない場合は空配列）。
+let CURRENT_DYNAMIC_INITIAL_DEFS = [];
 
 // 月別件数の初期値は、物件王の標準テンプレートExcel（損益計算書_株式会社テンプレート様）の
 // 実際の入力値（ライト/ベーシック/スタンダード各シートの売上件数内訳）をそのまま反映している。
@@ -656,6 +676,37 @@ function showCompositionChartEnabled(){
   return checkbox ? checkbox.checked : true;
 }
 
+// 補助金（デジタル化・AI導入補助金）・助成金のチェックボックスを組み立てる。
+// どちらも金額は固定（助成金の控除額のみ対象人数に比例）で、金額入力欄は持たない。
+function buildSubsidyToggles(){
+  const wrap = document.getElementById('subsidyFields');
+  if(!wrap) return;
+  wrap.insertAdjacentHTML('beforeend', `
+    <div class="field">
+      <label class="optional-label" for="subsidy_grant_enable">
+        <input type="checkbox" id="subsidy_grant_enable">
+        ${SUBSIDY_GRANT_LABEL}を活用する
+      </label>
+      <div class="computed-note">イニシャルコストから${SUBSIDY_GRANT_DEDUCTION}万円を控除し、申請サポート費用（成果報酬）${SUBSIDY_GRANT_SUPPORT_FEE}万円を加算します</div>
+    </div>
+    <div class="field">
+      <label class="optional-label" for="employment_grant_enable">
+        <input type="checkbox" id="employment_grant_enable">
+        助成金を活用する
+      </label>
+      <div class="input-row">
+        <input type="number" id="employment_grant_headcount" value="1" step="1" min="1" disabled>
+        <span class="unit">名（対象人数）</span>
+      </div>
+      <div class="computed-note">対象人数 × ${EMPLOYMENT_GRANT_PER_PERSON}万円をイニシャルコストから控除し、助成金申請サポート費用${EMPLOYMENT_GRANT_SUPPORT_FEE}万円を加算します</div>
+    </div>`);
+  const empCheckbox = document.getElementById('employment_grant_enable');
+  const empHeadcount = document.getElementById('employment_grant_headcount');
+  if(empCheckbox && empHeadcount){
+    empCheckbox.addEventListener('change', ()=>{ empHeadcount.disabled = !empCheckbox.checked; });
+  }
+}
+
 function buildPlanBuilderUI(){
   const tabsWrap = document.getElementById('builderPlanTabs');
   const panelsWrap = document.getElementById('builderPlanPanels');
@@ -790,6 +841,26 @@ function computeReportData(){
     CURRENT_INITIAL_VISIBLE[f.key] = visible;
     sharedInitial[f.key] = visible ? readNum(`shared_initial_${f.key}`, f.default) : 0;
   });
+
+  // 補助金（デジタル化・AI導入補助金）・助成金：チェックが入っていれば、控除額（マイナス）と
+  // 申請サポート費用（プラス）の2項目を sharedInitial に追加する。マイナス値のまま合算される
+  // ため、累計損益の計算（initialSum差引）にもそのまま正しく反映される。
+  CURRENT_DYNAMIC_INITIAL_DEFS = [];
+  const subsidyGrantEnabled = document.getElementById('subsidy_grant_enable')?.checked;
+  if(subsidyGrantEnabled){
+    sharedInitial.subsidy_grant_deduction = -SUBSIDY_GRANT_DEDUCTION;
+    sharedInitial.subsidy_grant_support_fee = SUBSIDY_GRANT_SUPPORT_FEE;
+    CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'subsidy_grant_deduction', label: SUBSIDY_GRANT_LABEL});
+    CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'subsidy_grant_support_fee', label:'補助金申請サポート費用'});
+  }
+  const employmentGrantEnabled = document.getElementById('employment_grant_enable')?.checked;
+  if(employmentGrantEnabled){
+    const headcount = Math.max(1, readNum('employment_grant_headcount', 1));
+    sharedInitial.employment_grant_deduction = -(headcount * EMPLOYMENT_GRANT_PER_PERSON);
+    sharedInitial.employment_grant_support_fee = EMPLOYMENT_GRANT_SUPPORT_FEE;
+    CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_deduction', label:`助成金（${headcount}名）`});
+    CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_support_fee', label:'助成金申請サポート費用'});
+  }
 
   PLAN_DEFS.forEach(p=>{
     const initial = { ...sharedInitial };
@@ -993,8 +1064,12 @@ function buildPlanPanelHTML(p, isActive){
 
   const initialRows = INITIAL_COST_DEFS.concat(SHARED_INITIAL_COST_DEFS)
     .filter(ic => CURRENT_INITIAL_VISIBLE[ic.key] !== false)
-    .map(ic=>`
-    <li><span class="a-label">${ic.label}</span><span class="a-value">${p.initial[ic.key] ? fmtNum(p.initial[ic.key]) + ' 万円' : '—'}</span></li>`).join('');
+    .concat(CURRENT_DYNAMIC_INITIAL_DEFS)
+    .map(ic=>{
+      const v = p.initial[ic.key];
+      const isNeg = v < 0;
+      return `<li><span class="a-label">${ic.label}</span><span class="a-value${isNeg ? ' neg' : ''}">${v ? fmtNum(v) + ' 万円' : '—'}</span></li>`;
+    }).join('');
 
   const theadCells = headers.map(h=>`<th class="${h.isTotal ? 'year-total' : ''}">${h.label}</th>`).join('');
   const tbodyHtml = sections.map(sec=>{
@@ -1077,6 +1152,7 @@ function buildReportHTML(data){
 
   return `
   <div class="header">
+    <div class="tax-note">表示金額はすべて税別です</div>
     <div class="header-inner">
       <h1>${companyNameEsc}</h1>
       <div class="title-main">損益計算書</div>
@@ -1301,6 +1377,9 @@ function captureInputSnapshot(){
   SGA_FIELD_DEFS.filter(f=>f.optional).forEach(f=>{ const el = document.getElementById(`sga_enable_${f.id}`); if(el) snap.sgaEnabled[f.id] = el.checked; });
   SHARED_INITIAL_COST_DEFS.filter(f=>f.optional).forEach(f=>{ const el = document.getElementById(`shared_initial_enable_${f.key}`); if(el) snap.sharedInitialEnabled[f.key] = el.checked; });
   { const el = document.getElementById('show_composition_chart'); if(el) snap.showCompositionChart = el.checked; }
+  { const el = document.getElementById('subsidy_grant_enable'); if(el) snap.subsidyGrantEnabled = el.checked; }
+  { const el = document.getElementById('employment_grant_enable'); if(el) snap.employmentGrantEnabled = el.checked; }
+  { const el = document.getElementById('employment_grant_headcount'); if(el) snap.employmentGrantHeadcount = el.value; }
   PLAN_DEFS.forEach(p=>{
     const planSnap = { initial: {}, counts: {} };
     INITIAL_COST_DEFS.forEach(ic=>{ const el = document.getElementById(`plan_${p.slug}_initial_${ic.key}`); if(el) planSnap.initial[ic.key] = el.value; });
@@ -1347,6 +1426,13 @@ function applyInputSnapshot(snap){
     if(input) input.disabled = !snap.sharedInitialEnabled[f.key];
   });
   if(snap.showCompositionChart !== undefined) setChecked('show_composition_chart', snap.showCompositionChart);
+  if(snap.subsidyGrantEnabled !== undefined) setChecked('subsidy_grant_enable', snap.subsidyGrantEnabled);
+  if(snap.employmentGrantHeadcount !== undefined) setVal('employment_grant_headcount', snap.employmentGrantHeadcount);
+  if(snap.employmentGrantEnabled !== undefined){
+    setChecked('employment_grant_enable', snap.employmentGrantEnabled);
+    const headcountInput = document.getElementById('employment_grant_headcount');
+    if(headcountInput) headcountInput.disabled = !snap.employmentGrantEnabled;
+  }
   recalcWelfareDisplay();
   if(snap.plans) PLAN_DEFS.forEach(p=>{
     const ps = snap.plans[p.slug];
@@ -1471,6 +1557,7 @@ async function exportStandaloneHtml(){
 buildMasterFields();
 buildCategoryToggles();
 buildDisplayToggles();
+buildSubsidyToggles();
 buildPlanBuilderUI();
 
 document.getElementById('generateBtn').addEventListener('click', ()=>{
