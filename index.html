@@ -458,6 +458,8 @@ let CURRENT_SGA_FIELDS = SGA_FIELD_DEFS;
 let CURRENT_INITIAL_VISIBLE = {};
 // 「売上構成比グラフを表示する」チェックボックスの状態。computeReportData()の先頭で反映する。
 let CURRENT_SHOW_COMPOSITION = true;
+// 「累計推移グラフを表示する」チェックボックスの状態。computeReportData()の先頭で反映する。
+let CURRENT_SHOW_TREND_CHART = true;
 
 // プランごとに異なるイニシャルコスト
 const INITIAL_COST_DEFS = [
@@ -661,8 +663,9 @@ function setCategoryFieldsVisible(catKey, visible){
   document.querySelectorAll(`tr[data-cat="${catKey}"]`).forEach(tr=>{ tr.style.display = visible ? '' : 'none'; });
 }
 
-// レポートの「売上構成比」カード（円グラフ＋凡例）自体を出す/出さないの切り替え。
-// カテゴリの選択（取り扱う商品カテゴリ）とは別軸で、グラフのセクションごと不要な会社向け。
+// レポートの「売上構成比」カード（円グラフ＋凡例）・「累計推移グラフ」カード（折れ線グラフ）を
+// それぞれ出す/出さないの切り替え。カテゴリの選択（取り扱う商品カテゴリ）とは別軸で、
+// グラフのセクションごと不要な会社向け。
 function buildDisplayToggles(){
   const wrap = document.getElementById('displayToggles');
   if(!wrap) return;
@@ -670,10 +673,18 @@ function buildDisplayToggles(){
     <label class="toggle-field">
       <input type="checkbox" id="show_composition_chart" checked>
       売上構成比グラフを表示する
+    </label>
+    <label class="toggle-field">
+      <input type="checkbox" id="show_trend_chart" checked>
+      累計推移グラフを表示する
     </label>`);
 }
 function showCompositionChartEnabled(){
   const checkbox = document.getElementById('show_composition_chart');
+  return checkbox ? checkbox.checked : true;
+}
+function showTrendChartEnabled(){
+  const checkbox = document.getElementById('show_trend_chart');
   return checkbox ? checkbox.checked : true;
 }
 
@@ -822,6 +833,7 @@ function computeReportData(){
   CURRENT_CATEGORIES = activeCategories();
   CURRENT_SGA_FIELDS = activeSgaFields();
   CURRENT_SHOW_COMPOSITION = showCompositionChartEnabled();
+  CURRENT_SHOW_TREND_CHART = showTrendChartEnabled();
 
   const companyName = (document.getElementById('companyNameInput').value || '').trim() || '株式会社○○　御中';
   const master = readMaster();
@@ -1063,6 +1075,22 @@ function buildPlanPanelHTML(p, isActive){
       </div>
     </div>` : '';
 
+  const trendChartCardHtml = CURRENT_SHOW_TREND_CHART ? `
+    <div class="card">
+      <h2>累計推移グラフ</h2>
+      <div class="chart-controls">
+        <button class="metric-btn" data-metric="cum_sales">累計売上</button>
+        <button class="metric-btn" data-metric="cum_operating_profit">累計営業利益</button>
+        <button class="metric-btn" data-metric="cum_profit">累計損益</button>
+        <div class="year-toggle">
+          <button class="year-btn active" data-range="24">1〜24ヶ月</button>
+          <button class="year-btn" data-range="12a">1年目(1-12)</button>
+          <button class="year-btn" data-range="12b">2年目(13-24)</button>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="chart-${p.key}"></canvas></div>
+    </div>` : '';
+
   const initialRows = INITIAL_COST_DEFS.concat(SHARED_INITIAL_COST_DEFS)
     .filter(ic => CURRENT_INITIAL_VISIBLE[ic.key] !== false)
     .concat(CURRENT_DYNAMIC_INITIAL_DEFS)
@@ -1098,21 +1126,7 @@ function buildPlanPanelHTML(p, isActive){
       </div>
     </div>
     ${compositionCardHtml}
-    <div class="card">
-      <h2>累計推移グラフ</h2>
-      <div class="chart-controls">
-        <button class="metric-btn" data-metric="cum_sales">累計売上</button>
-        <button class="metric-btn" data-metric="cum_operating_profit">累計営業利益</button>
-        <button class="metric-btn" data-metric="cum_profit">累計損益</button>
-        <div class="year-toggle">
-          <button class="year-btn active" data-range="24">1〜24ヶ月</button>
-          <button class="year-btn" data-range="12a">1年目(1-12)</button>
-          <button class="year-btn" data-range="12b">2年目(13-24)</button>
-        </div>
-      </div>
-      <div class="chart-wrap"><canvas id="chart-${p.key}"></canvas></div>
-    </div>
-
+    ${trendChartCardHtml}
     <div class="card">
       <h2>月次損益テーブル</h2>
       <div class="table-scroll">
@@ -1378,6 +1392,7 @@ function captureInputSnapshot(){
   SGA_FIELD_DEFS.filter(f=>f.optional).forEach(f=>{ const el = document.getElementById(`sga_enable_${f.id}`); if(el) snap.sgaEnabled[f.id] = el.checked; });
   SHARED_INITIAL_COST_DEFS.filter(f=>f.optional).forEach(f=>{ const el = document.getElementById(`shared_initial_enable_${f.key}`); if(el) snap.sharedInitialEnabled[f.key] = el.checked; });
   { const el = document.getElementById('show_composition_chart'); if(el) snap.showCompositionChart = el.checked; }
+  { const el = document.getElementById('show_trend_chart'); if(el) snap.showTrendChart = el.checked; }
   { const el = document.getElementById('subsidy_grant_enable'); if(el) snap.subsidyGrantEnabled = el.checked; }
   { const el = document.getElementById('employment_grant_enable'); if(el) snap.employmentGrantEnabled = el.checked; }
   { const el = document.getElementById('employment_grant_headcount'); if(el) snap.employmentGrantHeadcount = el.value; }
@@ -1427,6 +1442,7 @@ function applyInputSnapshot(snap){
     if(input) input.disabled = !snap.sharedInitialEnabled[f.key];
   });
   if(snap.showCompositionChart !== undefined) setChecked('show_composition_chart', snap.showCompositionChart);
+  if(snap.showTrendChart !== undefined) setChecked('show_trend_chart', snap.showTrendChart);
   if(snap.subsidyGrantEnabled !== undefined) setChecked('subsidy_grant_enable', snap.subsidyGrantEnabled);
   if(snap.employmentGrantHeadcount !== undefined) setVal('employment_grant_headcount', snap.employmentGrantHeadcount);
   if(snap.employmentGrantEnabled !== undefined){
