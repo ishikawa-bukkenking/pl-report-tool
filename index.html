@@ -198,8 +198,8 @@
   .assumptions-grid h3{ font-size:13px; color:var(--text-muted); margin:0 0 8px; border-bottom:2px solid var(--tint); padding-bottom:6px; }
   .assumptions-list{ list-style:none; margin:0; padding:0; }
   .assumptions-list li{ display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed var(--border); font-size:13px; }
-  .assumptions-list li .a-label{ color:var(--text-muted); }
-  .assumptions-list li .a-value{ font-weight:700; color:var(--heading); }
+  .assumptions-list li .a-label{ color:var(--text-muted); flex:1; min-width:0; padding-right:10px; }
+  .assumptions-list li .a-value{ font-weight:700; color:var(--heading); white-space:nowrap; flex-shrink:0; }
   .assumptions-list li .a-value.neg{ color:var(--neg); }
 
   .plan-panel{ display:none; }
@@ -483,6 +483,7 @@ const SUBSIDY_GRANT_SUPPORT_FEE = 10;     // 補助金申請サポート費用�
 const SUBSIDY_GRANT_LABEL = 'デジタル化・AI導入補助金';
 const EMPLOYMENT_GRANT_PER_PERSON = 21.6; // 助成金：対象人数×21.6万円（=216,000円）が控除される
 const EMPLOYMENT_GRANT_SUPPORT_FEE = 53.6;// 助成金申請サポート費用（万円、=536,000円、人数によらず固定）
+const EMPLOYMENT_GRANT_LABEL = '人材開発支援助成金　事業展開等リスキリング支援コース';
 // レポートの「イニシャルコスト」に表示する項目定義。computeReportData()の先頭で
 // チェックボックスの状態に応じて毎回作り直す（項目自体が存在しない場合は空配列）。
 let CURRENT_DYNAMIC_INITIAL_DEFS = [];
@@ -692,7 +693,7 @@ function buildSubsidyToggles(){
     <div class="field">
       <label class="optional-label" for="employment_grant_enable">
         <input type="checkbox" id="employment_grant_enable">
-        助成金を活用する
+        ${EMPLOYMENT_GRANT_LABEL}を活用する
       </label>
       <div class="input-row">
         <input type="number" id="employment_grant_headcount" value="1" step="1" min="1" disabled>
@@ -858,7 +859,7 @@ function computeReportData(){
     const headcount = Math.max(1, readNum('employment_grant_headcount', 1));
     sharedInitial.employment_grant_deduction = -(headcount * EMPLOYMENT_GRANT_PER_PERSON);
     sharedInitial.employment_grant_support_fee = EMPLOYMENT_GRANT_SUPPORT_FEE;
-    CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_deduction', label:`助成金（${headcount}名）`});
+    CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_deduction', label:`${EMPLOYMENT_GRANT_LABEL}（${headcount}名）`});
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_support_fee', label:'助成金申請サポート費用'});
   }
 
