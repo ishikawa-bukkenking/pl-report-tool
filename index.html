@@ -279,10 +279,12 @@
       break-inside:avoid; page-break-inside:avoid; box-shadow:none;
       border:1px solid var(--border); margin-bottom:3mm; padding:3mm 4mm;
     }
-    /* 月次損益テーブルだけは1プラン分でも縦に長く、1ページに収まりきらないことが多いため、
-       ここだけは強制的な改ページ回避を諦めて自然に分割させる（避けようとすると逆に
-       ページの大半が空白になり、より見づらくなるため）。 */
-    .card:has(.month-input-table), .card:has(.table-scroll table){ break-inside:auto; page-break-inside:auto; }
+    /* 月次損益テーブル（イニシャルコスト以下も含め）は複数ページにまたがらせず、
+       必ず1ページ内に収める。取り扱う商品カテゴリ・販管費・補助金/助成金などの
+       チェックボックスで表示行数が変動しても崩れないよう、フォントサイズ・行の
+       高さは「全項目を表示した最大パターン（カテゴリ5種×3セクション＋販管費9項目＋
+       固定行＝ヘッダー込み35行）」を基準に、常にこの1ページに収まる大きさへ固定して
+       いる（行数が少ない場合は余白が増えるだけで、崩れることはない）。 */
 
     .summary-grid{ grid-template-columns:repeat(5, 1fr) !important; gap:2mm !important; }
     .stat{ padding:2mm 3mm; }
@@ -298,10 +300,10 @@
     .composition-chart-wrap, .chart-wrap{ break-inside:avoid; }
 
     .table-scroll{ overflow:visible !important; border:none; }
-    table{ min-width:0 !important; width:100%; table-layout:auto; font-size:7.5px; }
-    thead th{ position:static; padding:2px 3px; }
-    tbody th{ position:static; padding:2px 3px; background:#f0f2f6 !important; }
-    tbody td{ padding:2px 3px; }
+    table{ min-width:0 !important; width:100%; table-layout:auto; font-size:7px; line-height:1.2; }
+    thead th{ position:static; padding:1.5px 3px; }
+    tbody th{ position:static; padding:1.5px 3px; background:#f0f2f6 !important; }
+    tbody td{ padding:1.5px 3px; }
 
     .assumptions-grid{ grid-template-columns:repeat(4, 1fr) !important; }
   }
@@ -397,12 +399,12 @@ const SALES_FIELD_DEFS = [
 ];
 
 const SGA_FIELD_DEFS = [
-  {id:'office_support', label:'事務サポート給与', default:25},
   {id:'sales_salary', label:'営業給与', default:30},
+  {id:'office_support', label:'事務サポート給与', default:25},
   {id:'welfare', label:'法定福利費', default:0, computed:true, computedNote:'事務サポート給与＋営業給与 の16%'},
   {id:'bpo', label:'BPO費', default:0},
   {id:'ppc_ad', label:'PPC広告費用', default:20},
-  {id:'ppc_support', label:'PPC広告運用サポート費用', default:0},
+  {id:'ppc_support', label:'PPC広告運用サポート費用', default:10},
   {id:'rent', label:'地代家賃', default:0},
   {id:'misc', label:'雑費', default:10},
   {id:'growth_invest', label:'成長投資費', default:5},
