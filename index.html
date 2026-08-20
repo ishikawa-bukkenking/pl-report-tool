@@ -411,7 +411,10 @@ const SALES_FIELD_DEFS = [
 ];
 
 const SGA_FIELD_DEFS = [
-  {id:'sales_salary', label:'営業給与', default:30},
+  // 営業担当を置かない会社もあるため、チェックボックスで有無を選べるようにしている
+  // （デフォルトは有効＝これまで通り常時計上される状態）。未チェックにすると
+  // 販管費の一覧からも行ごと消え、法定福利費の自動計算からも除外される。
+  {id:'sales_salary', label:'営業給与', default:30, optional:true, defaultChecked:true},
   {id:'office_support', label:'事務サポート給与', default:25},
   {id:'welfare', label:'法定福利費', default:0, computed:true, computedNote:'事務サポート給与＋営業給与 の16%'},
   {id:'bpo', label:'BPO費', default:0},
@@ -524,26 +527,36 @@ function readNum(id, fallback){
 
 // ---- 1. 入力フォームの組み立て ----
 
-// 給与2項目（事務サポート給与＋営業の給料）の合計×16%を「法定福利費」欄に自動反映する。
+// 給与2項目（事務サポート給与＋営業給与）の合計×16%を「法定福利費」欄に自動反映する。
 // 欄自体は編集不可（readonly/disabled）にし、常に計算結果を表示する。
+// 営業給与のようにチェックボックスで無効化されている項目は、金額欄に数値が残って
+// いても0円として扱う（未チェック＝その給与自体が存在しない、という意味のため）。
 function recalcWelfareDisplay(){
   const el = document.getElementById('master_sga_welfare');
   if(!el) return;
-  const sum = SALARY_SGA_IDS.reduce((s,id)=> s + readNum(`master_sga_${id}`, 0), 0);
+  const sum = SALARY_SGA_IDS.reduce((s,id)=>{
+    const checkbox = document.getElementById(`sga_enable_${id}`);
+    if(checkbox && !checkbox.checked) return s;
+    return s + readNum(`master_sga_${id}`, 0);
+  }, 0);
   el.value = Math.round(sum * WELFARE_RATE * 10) / 10;
 }
 
-// チェックボックス付きのオン/オフ切り替え項目（宅建士の採用費用・宅建業取得費用）を
+// チェックボックス付きのオン/オフ切り替え項目（営業給与・宅建士の採用費用・宅建業取得費用）を
 // 共通の見た目で作る。チェックが入っている間だけ金額入力を編集可能にする。
-function buildOptionalField(checkboxId, inputId, label, defaultValue, unit){
+// defaultChecked=trueの場合は、初期状態からチェック済み・金額欄も編集可能な状態で表示する
+// （営業給与のように「基本は計上するが、必要なければ外せる」項目向け）。
+function buildOptionalField(checkboxId, inputId, label, defaultValue, unit, defaultChecked){
+  const checkedAttr = defaultChecked ? ' checked' : '';
+  const disabledAttr = defaultChecked ? '' : ' disabled';
   return `
     <div class="field">
       <label class="optional-label" for="${checkboxId}">
-        <input type="checkbox" id="${checkboxId}">
+        <input type="checkbox" id="${checkboxId}"${checkedAttr}>
         ${label}
       </label>
       <div class="input-row">
-        <input type="number" id="${inputId}" value="${defaultValue}" step="1" min="0" disabled>
+        <input type="number" id="${inputId}" value="${defaultValue}" step="1" min="0"${disabledAttr}>
         <span class="unit">${unit}</span>
       </div>
     </div>`;
@@ -583,7 +596,7 @@ function buildMasterFields(){
       return;
     }
     if(f.optional){
-      sgaWrap.insertAdjacentHTML('beforeend', buildOptionalField(`sga_enable_${f.id}`, `master_sga_${f.id}`, f.label, f.default, '万円/月'));
+      sgaWrap.insertAdjacentHTML('beforeend', buildOptionalField(`sga_enable_${f.id}`, `master_sga_${f.id}`, f.label, f.default, '万円/月', f.defaultChecked));
       return;
     }
     sgaWrap.insertAdjacentHTML('beforeend', `
@@ -595,10 +608,13 @@ function buildMasterFields(){
         </div>
       </div>`);
   });
-  // 給与項目が変わるたびに法定福利費の自動計算を再表示する
+  // 給与項目が変わるたび（金額の変更・チェックボックスのオン/オフ）に法定福利費の
+  // 自動計算を再表示する
   SALARY_SGA_IDS.forEach(id=>{
     const el = document.getElementById(`master_sga_${id}`);
     if(el) el.addEventListener('input', recalcWelfareDisplay);
+    const checkbox = document.getElementById(`sga_enable_${id}`);
+    if(checkbox) checkbox.addEventListener('change', recalcWelfareDisplay);
   });
   recalcWelfareDisplay();
   SGA_FIELD_DEFS.filter(f=>f.optional).forEach(f=> wireOptionalField(`sga_enable_${f.id}`, `master_sga_${f.id}`));
