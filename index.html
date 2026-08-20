@@ -279,12 +279,17 @@
       break-inside:avoid; page-break-inside:avoid; box-shadow:none;
       border:1px solid var(--border); margin-bottom:3mm; padding:3mm 4mm;
     }
-    /* 月次損益テーブル（イニシャルコスト以下も含め）は複数ページにまたがらせず、
-       必ず1ページ内に収める。取り扱う商品カテゴリ・販管費・補助金/助成金などの
-       チェックボックスで表示行数が変動しても崩れないよう、フォントサイズ・行の
-       高さは「全項目を表示した最大パターン（カテゴリ5種×3セクション＋販管費9項目＋
-       固定行＝ヘッダー込み35行）」を基準に、常にこの1ページに収まる大きさへ固定して
-       いる（行数が少ない場合は余白が増えるだけで、崩れることはない）。 */
+    /* 月次損益テーブルは複数ページにまたがらせず、必ず1ページ内に収める。取り扱う商品
+       カテゴリ・販管費・補助金/助成金などのチェックボックスで表示行数が変動しても崩れ
+       ないよう、フォントサイズ・行の高さは「全項目を表示した最大パターン（カテゴリ5種
+       ×3セクション＋販管費9項目＋固定行＝ヘッダー込み35行）」を基準に、常にこの1ページ
+       に収まる大きさへ固定している（行数が少ない場合は余白が増えるだけで、崩れることは
+       ない）。
+       月次損益テーブルの次にくる「イニシャルコスト」は、あえて改ページしてテーブルとは
+       別ページに切り出し、代わりに（全プランの後に1回だけ出る）「前提条件」カードと
+       同じページにまとめる。イニシャルコスト自体は数行程度、前提条件も最大構成で
+       十数項目程度と、どちらも十分小さいため同じページに収まる。 */
+    .initial-cost-card{ break-before:page; page-break-before:always; }
 
     .summary-grid{ grid-template-columns:repeat(5, 1fr) !important; gap:2mm !important; }
     .stat{ padding:2mm 3mm; }
@@ -306,6 +311,13 @@
     tbody td{ padding:1.5px 3px; }
 
     .assumptions-grid{ grid-template-columns:repeat(4, 1fr) !important; }
+    /* イニシャルコストのリストは（前提条件と違って）中身が1列だけなので、上の4列指定
+       のままだと幅が1/4に圧縮され、「人材開発支援助成金 事業展開等リスキリング支援
+       コース」のような長い項目名が3行に折り返されて縦に長くなり、前提条件と同じ
+       ページに収まらなくなることがあった。イニシャルコストのカードだけは1列（フル
+       幅）に戻し、折り返しを抑えて高さを詰める。 */
+    .initial-cost-card .assumptions-grid{ grid-template-columns:1fr !important; }
+    .assumptions-list li{ font-size:11px !important; padding:3px 0 !important; }
   }
 </style>
 </head>
@@ -1111,7 +1123,7 @@ function buildPlanPanelHTML(p, isActive){
       </div>
     </div>
 
-    <div class="card">
+    <div class="card initial-cost-card">
       <h2>イニシャルコスト</h2>
       <div class="assumptions-grid"><div><ul class="assumptions-list">${initialRows}</ul></div></div>
     </div>
