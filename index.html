@@ -178,7 +178,10 @@
   .plan-panel.active{ display:block; }
 
   /* ---- ここから作成ツール（入力フォーム）専用スタイル ---- */
-  .builder-wrap{ max-width:900px; margin:0 auto; padding:24px; }
+  /* 月別件数の入力表は24ヶ月分だと横スクロールが必要になるが、なるべく多くの月が
+     スクロールなしで見えるよう、入力画面全体の最大幅を広めに取っている
+     （900pxだと1年分も見えないほど狭かったため）。 */
+  .builder-wrap{ max-width:1400px; margin:0 auto; padding:24px; }
   .builder-section{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:22px 24px; margin-bottom:20px; }
   .builder-section h2{ margin:0 0 4px; font-size:16px; font-weight:700; color:var(--heading); }
   .builder-section .hint{ font-size:12.5px; color:var(--text-muted); margin-bottom:16px; line-height:1.7; }
@@ -419,10 +422,15 @@ const SGA_FIELD_DEFS = [
   {id:'welfare', label:'法定福利費', default:0, computed:true, computedNote:'事務サポート給与＋営業給与 の16%'},
   {id:'bpo', label:'BPO費', default:0},
   {id:'ppc_ad', label:'PPC広告費用', default:20},
-  {id:'ppc_support', label:'PPC広告運用サポート費用', default:1},
   {id:'rent', label:'地代家賃', default:0},
   {id:'misc', label:'雑費', default:10},
   {id:'growth_invest', label:'成長投資費', default:5},
+];
+// PPC広告運用サポート費用は、プランによって必要かどうかが変わる（スタンダードプランは
+// サポート不要で0円にする、など）ため、他の販管費のように全プラン共通の1つの値ではなく、
+// プランごとに個別入力できるようにしている。defaultByPlanのキーはPLAN_DEFSのslugと対応する。
+const PLAN_SGA_FIELD_DEFS = [
+  {id:'ppc_support', label:'PPC広告運用サポート費用', defaultByPlan:{light:1, basic:1, standard:0}},
 ];
 // 法定福利費の自動計算に使う対象（給与項目の合計 × 16%）
 const WELFARE_RATE = 0.16;
@@ -738,6 +746,15 @@ function buildPlanBuilderUI(){
         </div>
       </div>`).join('');
 
+    const planSgaFieldsHtml = PLAN_SGA_FIELD_DEFS.map(f=>`
+      <div class="field">
+        <label>${f.label}</label>
+        <div class="input-row">
+          <input type="number" id="plan_${p.slug}_sga_${f.id}" value="${f.defaultByPlan[p.slug] ?? 0}" step="1" min="0">
+          <span class="unit">万円/月</span>
+        </div>
+      </div>`).join('');
+
     const monthHeaderHtml = Array.from({length:24}, (_,idx)=>`<th>${idx+1}月目</th>`).join('');
     const monthRowsHtml = CATEGORIES.map(cat=>{
       const defaults = p.countDefaults[cat.key];
@@ -749,6 +766,9 @@ function buildPlanBuilderUI(){
       <div class="builder-plan-panel${i===0?' active':''}" data-plan-slug="${p.slug}">
         <div class="builder-subhead">イニシャルコスト</div>
         <div class="field-grid">${initialFieldsHtml}</div>
+
+        <div class="builder-subhead">プラン別の販管費</div>
+        <div class="field-grid">${planSgaFieldsHtml}</div>
 
         <div class="builder-subhead">月別件数</div>
         <div style="overflow-x:auto;" class="table-scroll">
@@ -881,6 +901,13 @@ function computeReportData(){
     const initial = { ...sharedInitial };
     INITIAL_COST_DEFS.forEach(ic=>{ initial[ic.key] = readNum(`plan_${p.slug}_initial_${ic.key}`); });
 
+    // PPC広告運用サポート費用など、プランごとに個別入力する販管費項目を読み取り、
+    // 全プラン共通の販管費（master.sga）に上書き合成した「このプラン用のsga」を作る。
+    const planSga = { ...master.sga };
+    PLAN_SGA_FIELD_DEFS.forEach(f=>{
+      planSga[f.id] = readNum(`plan_${p.slug}_sga_${f.id}`, f.defaultByPlan[p.slug] ?? 0);
+    });
+
     // 件数は「月別件数」表（24個の入力欄）から直接読み取る。
     // この表は自動生成ボタンで一括入力できるほか、1件ずつ手入力で書き換えられる。
     const countsByCat = {};
@@ -907,7 +934,7 @@ function computeReportData(){
     const salesTotal = sumArr(CURRENT_CATEGORIES.map(c=>salesByCat[c.key]));
     const costTotal = sumArr(CURRENT_CATEGORIES.map(c=>costByCat[c.key]));
     const grossProfit = salesTotal.map((v,i)=>v - costTotal[i]);
-    const sgaMonthlyValue = CURRENT_SGA_FIELDS.reduce((s,f)=>s + (master.sga[f.id]||0), 0);
+    const sgaMonthlyValue = CURRENT_SGA_FIELDS.concat(PLAN_SGA_FIELD_DEFS).reduce((s,f)=>s + (planSga[f.id]||0), 0);
     const sgaTotal = Array(24).fill(sgaMonthlyValue);
     const operatingProfit = grossProfit.map((v,i)=>v - sgaTotal[i]);
     // 累計損益：1〜24ヶ月を通して途切れず積み上がる累計にする。
@@ -962,7 +989,7 @@ function computeReportData(){
     plansViewList.push({
       key: p.name, name: p.name,
       countsByCat, salesByCat, costByCat, salesTotal, costTotal, grossProfit,
-      sgaByItem: master.sga, sgaTotal, operatingProfit, cumulativeProfit,
+      sgaByItem: planSga, sgaTotal, operatingProfit, cumulativeProfit,
       initial, compositionByRange,
     });
   });
@@ -1039,7 +1066,7 @@ function buildTableSections(p){
       {label:'原価合計(B)', rowClass:'total-row', cells:buildCells(p.costTotal)},
       {label:'粗利(A-B)', rowClass:'total-row', cells:buildCells(p.grossProfit)},
     ]},
-    {title:'販管費内訳（万円）', rows: CURRENT_SGA_FIELDS.map(f=>({label:f.label, cells:buildCells(Array(24).fill(p.sgaByItem[f.id]))}))},
+    {title:'販管費内訳（万円）', rows: CURRENT_SGA_FIELDS.concat(PLAN_SGA_FIELD_DEFS).map(f=>({label:f.label, cells:buildCells(Array(24).fill(p.sgaByItem[f.id]))}))},
     {title:null, rows:[
       {label:'販管費合計(C)', rowClass:'total-row', cells:buildCells(p.sgaTotal)},
       {label:'営業利益(A-B-C)', rowClass:'highlight-row', cells:buildCells(p.operatingProfit)},
@@ -1399,8 +1426,9 @@ function captureInputSnapshot(){
   { const el = document.getElementById('employment_grant_enable'); if(el) snap.employmentGrantEnabled = el.checked; }
   { const el = document.getElementById('employment_grant_headcount'); if(el) snap.employmentGrantHeadcount = el.value; }
   PLAN_DEFS.forEach(p=>{
-    const planSnap = { initial: {}, counts: {} };
+    const planSnap = { initial: {}, sga: {}, counts: {} };
     INITIAL_COST_DEFS.forEach(ic=>{ const el = document.getElementById(`plan_${p.slug}_initial_${ic.key}`); if(el) planSnap.initial[ic.key] = el.value; });
+    PLAN_SGA_FIELD_DEFS.forEach(f=>{ const el = document.getElementById(`plan_${p.slug}_sga_${f.id}`); if(el) planSnap.sga[f.id] = el.value; });
     CATEGORIES.forEach(cat=>{
       const arr = [];
       for(let m=1; m<=24; m++){
@@ -1457,6 +1485,7 @@ function applyInputSnapshot(snap){
     const ps = snap.plans[p.slug];
     if(!ps) return;
     if(ps.initial) INITIAL_COST_DEFS.forEach(ic=>setVal(`plan_${p.slug}_initial_${ic.key}`, ps.initial[ic.key]));
+    if(ps.sga) PLAN_SGA_FIELD_DEFS.forEach(f=>setVal(`plan_${p.slug}_sga_${f.id}`, ps.sga[f.id]));
     if(ps.counts) CATEGORIES.forEach(cat=>{
       const arr = ps.counts[cat.key];
       if(!arr) return;
