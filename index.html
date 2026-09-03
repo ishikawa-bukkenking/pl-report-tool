@@ -410,6 +410,19 @@
 // 「編集する」→ 入力フォームに戻って値を直せる、という一連の操作ができるようにする。
 const PRISTINE_HTML = document.documentElement.outerHTML;
 
+// このレポートが「スプレッドシートに保存済みかどうか／どのファイルを指すか」を
+// 識別するための鍵。保存済みファイルを開いた場合は、そのファイルに埋め込まれている
+// window.__SAVED_REPORT_KEY をそのまま引き継ぐ（＝以後の保存はこのファイルの更新になる）。
+// まだ一度も保存していない新規レポートの場合はnullのままにしておき、最初に
+// 「この内容を保存する」を押したタイミングで初めて発行する。
+window.__reportKey = window.__SAVED_REPORT_KEY || null;
+function getOrCreateReportKey(){
+  if(!window.__reportKey){
+    window.__reportKey = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+  return window.__reportKey;
+}
+
 // ---- マスター項目の定義 ----
 const SALES_FIELD_DEFS = [
   {id:'brokerage_unit', label:'仲介手数料単価', unit:'万円', default:50, type:'unit'},
@@ -1551,7 +1564,13 @@ function buildStandaloneExportHtml(data){
   const companyNameEsc = escapeHtml(data.companyName);
   const snapshotJson = JSON.stringify(captureInputSnapshot());
   let html = PRISTINE_HTML.replace(/<title>[^<]*<\/title>/, `<title>${companyNameEsc} 損益計算書</title>`);
-  const bootScript = `<script>\napplyInputSnapshot(${snapshotJson});\ndocument.getElementById('generateBtn').click();\n<\/script>\n`;
+  // 現在のレポートIDをそのまま埋め込んでおく（nullならまだ未保存という意味のまま）。
+  // これにより、このファイルを開いて編集・再保存すると、新しい行を作らず
+  // 同じレポートとして上書き更新される。
+  // ページ先頭の `window.__reportKey = window.__SAVED_REPORT_KEY || null;` は
+  // このブートスクリプト（bodyの最後）より先に実行されてしまうため、__SAVED_REPORT_KEY
+  // だけでなく __reportKey 自体もここで明示的に上書きしておく（実行順に依存しないように）。
+  const bootScript = `<script>\nwindow.__SAVED_REPORT_KEY = ${JSON.stringify(window.__reportKey)};\nwindow.__reportKey = window.__SAVED_REPORT_KEY;\napplyInputSnapshot(${snapshotJson});\ndocument.getElementById('generateBtn').click();\n<\/script>\n`;
   // .replace('</body>', ...) は使わない：この関数自身のソースコードが（PRISTINE_HTMLの一部として）
   // 文字列リテラル "</body>" を含んでおり、先にそちらにマッチしてスクリプトが壊れてしまうため、
   // 実際に最後に現れる（＝本物の）閉じタグの位置を明示的に探して差し込む。
@@ -1575,7 +1594,7 @@ function isArtifactSandbox(){
   return (typeof claude !== 'undefined' && !!claude.use);
 }
 
-function logToSpreadsheet(data, html){
+function logToSpreadsheet(data, html, reportKey){
   if (!SPREADSHEET_WEBAPP_URL) return false;
   if (isArtifactSandbox()) return false; // Artifact版では動作しないため試行しない
   if (typeof fetch !== 'function') return false;
@@ -1585,6 +1604,9 @@ function logToSpreadsheet(data, html){
   fd.append('company', data.companyName);
   fd.append('date', savedAt);
   fd.append('html', html);
+  // reportKeyを渡すと、Apps Script側で同じキーの既存行・既存ファイルを探し、
+  // 新規追加ではなく上書き更新する（apps_script_code.gs側の対応が必要）。
+  if (reportKey) fd.append('reportKey', reportKey);
   fetch(SPREADSHEET_WEBAPP_URL, { method: 'POST', body: fd, mode: 'no-cors' }).catch(()=>{});
   return true;
 }
@@ -1641,13 +1663,31 @@ async function exportStandaloneHtml(){
   if(!data) return;
 
   if (!isArtifactSandbox() && SPREADSHEET_WEBAPP_URL) {
+    // 初めての保存ならここでレポートIDを新規発行する（以降、このIDを使って
+    // 同じレポートとして上書き更新され続ける）。すでにIDがあれば（＝一度でも
+    // 保存済み、または保存済みファイルを開いた場合）そのIDをそのまま使う。
+    const reportKey = getOrCreateReportKey();
     const html = buildStandaloneExportHtml(data);
-    logToSpreadsheet(data, html);
-    showExportStatus('スプレッドシートに保存しました。');
+    logToSpreadsheet(data, html, reportKey);
+    showExportStatus('スプレッドシートに保存しました。以後の編集は自動で保存されます。');
     return;
   }
 
   await downloadReportHtml();
+}
+
+// 一度でも保存したことのあるレポート（＝レポートIDを持っている）は、
+// 「レポートを生成する」を押し直す＝編集して更新するたびに、自動でスプレッドシート
+// （同じ行・同じファイル）へ上書き保存する。まだ一度も保存していない新規レポートは
+// 対象外（＝最初の保存は必ず「この内容を保存する」を手動で押す必要がある）。
+function maybeAutoSaveAfterGenerate(){
+  if (!window.__reportKey) return;
+  if (isArtifactSandbox() || !SPREADSHEET_WEBAPP_URL) return;
+  const data = window.__lastReportData;
+  if (!data) return;
+  const html = buildStandaloneExportHtml(data);
+  logToSpreadsheet(data, html, window.__reportKey);
+  showExportStatus('編集内容を自動保存しました。');
 }
 
 // ---- 6. ページ初期化 ----
@@ -1657,7 +1697,7 @@ buildDisplayToggles();
 buildSubsidyToggles();
 buildPlanBuilderUI();
 
-document.getElementById('generateBtn').addEventListener('click', ()=>{
+document.getElementById('generateBtn').addEventListener('click', (evt)=>{
   const data = computeReportData();
   window.__lastReportData = data;
   window.REPORT_DATA = { plan_keys: data.plansViewList.map(p=>p.key), plans: data.plans };
@@ -1666,6 +1706,13 @@ document.getElementById('generateBtn').addEventListener('click', ()=>{
   document.getElementById('report-view').style.display = 'block';
   window.scrollTo(0,0);
   REPORT_JS();
+  // 保存済みファイルを開いたときは、ブートスクリプトがこのボタンを自動でクリックして
+  // 最初の表示を行う（evt.isTrustedがfalseになる）。その「開いただけ」のタイミングでは
+  // 自動保存せず、実際にユーザーがボタンを押した（編集して再生成した）ときだけ
+  // 自動保存する。
+  if (evt && evt.isTrusted) {
+    maybeAutoSaveAfterGenerate();
+  }
 });
 
 document.getElementById('backToBuilderBtn').addEventListener('click', ()=>{
