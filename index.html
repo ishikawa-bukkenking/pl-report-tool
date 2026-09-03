@@ -1670,10 +1670,26 @@ async function exportStandaloneHtml(){
     const html = buildStandaloneExportHtml(data);
     logToSpreadsheet(data, html, reportKey);
     showExportStatus('スプレッドシートに保存しました。以後の編集は自動で保存されます。');
+    // 保存が完了した瞬間から以後の編集はすべて自動保存されるため、
+    // 「この内容を保存する」ボタンはもう不要になる。
+    updateExportButtonVisibility();
     return;
   }
 
   await downloadReportHtml();
+}
+
+// 「この内容を保存する」ボタンの表示・非表示を切り替える。
+// すでにスプレッドシートに保存済み（＝レポートIDを持っている）レポートは、
+// レポートを生成し直す（編集する）たびに自動で上書き保存されるため、このボタンは
+// 不要（スプレッドシートから開いた場合や、一度保存した後の編集がこれにあたる）。
+// スプレッドシート連携が設定されていない環境（Artifact版など）では、この
+// ボタンはHTMLダウンロード用のフォールバックとして機能するため常に表示する。
+function updateExportButtonVisibility(){
+  const btn = document.getElementById('exportHtmlBtn');
+  if(!btn) return;
+  const autoSaveActive = !!window.__reportKey && !isArtifactSandbox() && !!SPREADSHEET_WEBAPP_URL;
+  btn.style.display = autoSaveActive ? 'none' : '';
 }
 
 // 一度でも保存したことのあるレポート（＝レポートIDを持っている）は、
@@ -1704,6 +1720,7 @@ document.getElementById('generateBtn').addEventListener('click', (evt)=>{
   document.getElementById('report-root').innerHTML = buildReportHTML(data);
   document.getElementById('builder-view').style.display = 'none';
   document.getElementById('report-view').style.display = 'block';
+  updateExportButtonVisibility();
   window.scrollTo(0,0);
   REPORT_JS();
   // 保存済みファイルを開いたときは、ブートスクリプトがこのボタンを自動でクリックして
