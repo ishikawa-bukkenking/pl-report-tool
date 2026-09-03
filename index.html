@@ -87,6 +87,11 @@
   .header .title-main{ font-size:30px; font-weight:700; letter-spacing:.02em; margin-bottom:6px; }
   .header .sub{ font-size:13px; opacity:.8; max-width:640px; }
   .header .tax-note{ position:absolute; top:14px; right:20px; font-size:11px; opacity:.7; }
+  /* レポート画面のタイトル：以前は会社名（小さめ）と「損益計算書」（大きめ）を
+     縦に2段で表示していたが、「損益計算書」の方だけが目立ちすぎるとのことで、
+     会社名と横並びの1行にまとめ、両方とも大きめの同じ大きさで表示するようにした。 */
+  .header .report-title-row{ display:flex; align-items:baseline; flex-wrap:wrap; gap:12px; }
+  .header .report-company, .header .report-doctype{ font-size:28px; font-weight:700; letter-spacing:.02em; }
   .container{ max-width:1200px; margin:0 auto; padding:24px; }
 
   .plan-tabs{ display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
@@ -276,7 +281,7 @@
     html, body{ background:#fff; }
     .container{ max-width:none !important; padding:0 !important; margin:0 !important; }
     .header{ padding:14px 4mm 12px !important; }
-    .header .title-main{ font-size:22px !important; }
+    .header .report-company, .header .report-doctype{ font-size:20px !important; }
     .header .tax-note{ top:6px !important; right:4mm !important; }
 
     .plan-tabs{ display:none !important; }
@@ -1237,8 +1242,10 @@ function buildReportHTML(data){
   <div class="header">
     <div class="tax-note">表示金額はすべて税別です</div>
     <div class="header-inner">
-      <h1>${companyNameEsc}</h1>
-      <div class="title-main">損益計算書</div>
+      <div class="report-title-row">
+        <span class="report-company">${companyNameEsc}</span>
+        <span class="report-doctype">損益計算書</span>
+      </div>
     </div>
   </div>
   <div class="container">
