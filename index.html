@@ -231,6 +231,10 @@
     width:56px; padding:5px 4px; border:1px solid var(--border); border-radius:5px; font-size:12px;
     background:var(--input-bg); color:var(--text); text-align:right; font-family:inherit;
   }
+  /* 「1年目計」「2年目計」列：入力欄ではなく自動計算した数値を表示するだけの列なので、
+     背景色を変えて他の入力マスと見分けやすくしている。 */
+  .month-input-table th.month-total-col{ background:var(--tint); color:var(--heading); }
+  .month-input-table td.month-total-col{ background:var(--tint); text-align:right; padding:4px 10px; font-weight:700; color:var(--heading); font-variant-numeric:tabular-nums; }
 
   .generate-bar{ position:sticky; bottom:0; background:linear-gradient(0deg, var(--bg) 65%, transparent); padding:18px 0 10px; text-align:center; }
   .btn-primary{
@@ -729,6 +733,19 @@ function buildSubsidyToggles(){
   }
 }
 
+// 月別件数の入力表にある「1年目計」「2年目計」を、24個の入力欄の現在値から
+// 都度計算して表示する。入力欄そのものではなく<span>表示のみなので、生成前でも
+// 入力しながら合計を確認できる。
+function recalcMonthTotals(slug, catKey){
+  let sum1 = 0, sum2 = 0;
+  for(let m=1; m<=12; m++){ sum1 += readNum(`plan_${slug}_count_${catKey}_${m}`); }
+  for(let m=13; m<=24; m++){ sum2 += readNum(`plan_${slug}_count_${catKey}_${m}`); }
+  const el1 = document.getElementById(`plan_${slug}_total1_${catKey}`);
+  const el2 = document.getElementById(`plan_${slug}_total2_${catKey}`);
+  if(el1) el1.textContent = fmtNum(sum1);
+  if(el2) el2.textContent = fmtNum(sum2);
+}
+
 function buildPlanBuilderUI(){
   const tabsWrap = document.getElementById('builderPlanTabs');
   const panelsWrap = document.getElementById('builderPlanPanels');
@@ -755,10 +772,22 @@ function buildPlanBuilderUI(){
         </div>
       </div>`).join('');
 
-    const monthHeaderHtml = Array.from({length:24}, (_,idx)=>`<th>${idx+1}月目</th>`).join('');
+    // 月別件数の入力表に「1年目計」「2年目計」の自動計算列を追加する（12月目の直後・
+    // 24月目の直後）。レポート側の月次損益テーブルと同じ位置関係にしている。
+    const monthHeaderHtml = Array.from({length:24}, (_,idx)=>{
+      const th = `<th>${idx+1}月目</th>`;
+      if(idx === 11) return th + `<th class="month-total-col">1年目計</th>`;
+      if(idx === 23) return th + `<th class="month-total-col">2年目計</th>`;
+      return th;
+    }).join('');
     const monthRowsHtml = CATEGORIES.map(cat=>{
       const defaults = p.countDefaults[cat.key];
-      const cells = defaults.map((v,idx)=>`<td><input type="number" id="plan_${p.slug}_count_${cat.key}_${idx+1}" value="${v}" step="1" min="0"></td>`).join('');
+      const cells = defaults.map((v,idx)=>{
+        const td = `<td><input type="number" id="plan_${p.slug}_count_${cat.key}_${idx+1}" value="${v}" step="1" min="0"></td>`;
+        if(idx === 11) return td + `<td class="month-total-col"><span id="plan_${p.slug}_total1_${cat.key}">0</span></td>`;
+        if(idx === 23) return td + `<td class="month-total-col"><span id="plan_${p.slug}_total2_${cat.key}">0</span></td>`;
+        return td;
+      }).join('');
       return `<tr data-cat="${cat.key}"><th>${cat.countLabel}</th>${cells}</tr>`;
     }).join('');
 
@@ -778,6 +807,16 @@ function buildPlanBuilderUI(){
           </table>
         </div>
       </div>`);
+
+    // 月別件数を1マス編集するたびに、その行の「1年目計」「2年目計」を自動で
+    // 再計算して表示する（入力の確認用。レポート生成前でも合計が見える）。
+    CATEGORIES.forEach(cat=>{
+      for(let m=1; m<=24; m++){
+        const input = document.getElementById(`plan_${p.slug}_count_${cat.key}_${m}`);
+        if(input) input.addEventListener('input', ()=>recalcMonthTotals(p.slug, cat.key));
+      }
+      recalcMonthTotals(p.slug, cat.key);
+    });
   });
 
   tabsWrap.querySelectorAll('.builder-plan-tab').forEach(tab=>{
@@ -1490,6 +1529,9 @@ function applyInputSnapshot(snap){
       const arr = ps.counts[cat.key];
       if(!arr) return;
       for(let m=1; m<=24; m++){ setVal(`plan_${p.slug}_count_${cat.key}_${m}`, arr[m-1]); }
+      // setValは.valueを書き換えるだけでinputイベントを発火しないため、
+      // 「1年目計」「2年目計」の自動計算表示も明示的に更新し直す。
+      recalcMonthTotals(p.slug, cat.key);
     });
   });
 }
