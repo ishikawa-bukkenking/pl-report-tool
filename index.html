@@ -157,7 +157,13 @@
   .composition-legend .c-value{ margin-left:auto; font-weight:600; color:var(--text); }
   .composition-legend .c-pct{ width:52px; text-align:right; font-weight:700; color:var(--heading); }
 
-  .table-scroll{ overflow-x:auto; border-radius:8px; border:1px solid var(--border); }
+  /* overflow-xだけをautoにすると、overflow-yも(仕様上)自動的にautoへ変換される。
+     このとき高さを指定していないと「auto」でも実際には内部スクロールが発生せず、
+     結果としてthead/tbodyのposition:stickyがページスクロールに追従しない
+     （見出し・項目列が上や左に固定されない）という不具合になる。
+     max-heightを明示してこの箱自体を実際にスクロールする領域にすることで、
+     stickyな見出し行・項目列がスクロール中も正しく効くようにしている。 */
+  .table-scroll{ overflow-x:auto; overflow-y:auto; max-height:min(620px, 65vh); border-radius:8px; border:1px solid var(--border); }
   table{ border-collapse:collapse; width:100%; min-width:1400px; font-size:12.5px; }
   thead th{ position:sticky; top:0; background:var(--navy); color:#fff; padding:8px 10px; text-align:right; white-space:nowrap; font-weight:600; z-index:2; }
   thead th:first-child{ text-align:left; left:0; z-index:3; }
@@ -303,7 +309,7 @@
        十数項目程度と、どちらも十分小さいため同じページに収まる。 */
     .initial-cost-card{ break-before:page; page-break-before:always; }
 
-    .summary-grid{ grid-template-columns:repeat(5, 1fr) !important; gap:2mm !important; }
+    .summary-grid{ grid-template-columns:repeat(7, 1fr) !important; gap:2mm !important; }
     .stat{ padding:2mm 3mm; }
     .stat .value{ font-size:15px !important; }
 
@@ -316,7 +322,7 @@
        A4横向きなら幅に余裕があるため、画面と同じ大きさのままでも問題なく収まる。 */
     .composition-chart-wrap, .chart-wrap{ break-inside:avoid; }
 
-    .table-scroll{ overflow:visible !important; border:none; }
+    .table-scroll{ overflow:visible !important; max-height:none !important; border:none; }
     table{ min-width:0 !important; width:100%; table-layout:auto; font-size:7px; line-height:1.2; }
     thead th{ position:static; padding:1.5px 3px; }
     tbody th{ position:static; padding:1.5px 3px; background:#f0f2f6 !important; }
@@ -1097,11 +1103,13 @@ function computeBreakEvenMonth(cumulativeProfit){
 function buildStats(p){
   const salesY1 = p.salesTotal.slice(0,12).reduce((a,b)=>a+b,0);
   const salesY2 = p.salesTotal.slice(12,24).reduce((a,b)=>a+b,0);
+  const grossY1 = p.grossProfit.slice(0,12).reduce((a,b)=>a+b,0);
+  const grossY2 = p.grossProfit.slice(12,24).reduce((a,b)=>a+b,0);
   const opY1 = p.operatingProfit.slice(0,12).reduce((a,b)=>a+b,0);
   const opY2 = p.operatingProfit.slice(12,24).reduce((a,b)=>a+b,0);
   const cumFinal = p.cumulativeProfit[23];
   const breakEvenMonth = computeBreakEvenMonth(p.cumulativeProfit);
-  return { salesY1, salesY2, opY1, opY2, cumFinal, breakEvenMonth };
+  return { salesY1, salesY2, grossY1, grossY2, opY1, opY2, cumFinal, breakEvenMonth };
 }
 // 売上構成比の凡例<li>群を組み立てる（computeComposition()が返す [{label,value,pct}, ...] 形式を受け取る）
 function buildCompositionLegendRows(comp){
@@ -1205,8 +1213,10 @@ function buildPlanPanelHTML(p, isActive){
       <h2>${escapeHtml(p.name)}プラン サマリー <span class="badge">1〜24ヶ月</span></h2>
       <div class="summary-grid">
         <div class="stat"><div class="label">1年目 売上合計</div><div class="value">${fmtNum(stats.salesY1)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
+        <div class="stat"><div class="label">1年目 粗利合計</div><div class="value ${stats.grossY1<0?'neg':''}">${fmtNum(stats.grossY1)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
         <div class="stat"><div class="label">1年目 営業利益</div><div class="value ${stats.opY1<0?'neg':''}">${fmtNum(stats.opY1)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
         <div class="stat"><div class="label">2年目 売上合計</div><div class="value">${fmtNum(stats.salesY2)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
+        <div class="stat"><div class="label">2年目 粗利合計</div><div class="value ${stats.grossY2<0?'neg':''}">${fmtNum(stats.grossY2)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
         <div class="stat"><div class="label">2年目 営業利益</div><div class="value ${stats.opY2<0?'neg':''}">${fmtNum(stats.opY2)} <span style="font-size:12px;font-weight:400;">万円</span></div></div>
         <div class="stat"><div class="label">黒字転換のタイミング</div><div class="value ${hasBreakEven?'':'neg'}">${breakEvenValueHtml}</div><div class="sub">${breakEvenSub}</div></div>
       </div>
