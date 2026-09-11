@@ -1264,6 +1264,15 @@ function buildReportHTML(data){
   }).join('');
   const masterSgaHtml = CURRENT_SGA_FIELDS.map(f=>
     `<li><span class="a-label">${f.label}</span><span class="a-value">${fmtNum(data.master.sga[f.id])} 万円</span></li>`).join('');
+  // PPC広告運用サポート費用は、全プラン共通の販管費とは違いプランごとに金額が異なる
+  // （PLAN_SGA_FIELD_DEFS）ため、上のmasterSgaHtmlとは別に、プラン名を添えた行として
+  // 1プランにつき1行ずつ追加する（前提条件カードは「全プラン共通」の項目が基本だが、
+  // このように一部の項目だけプラン別の値になる場合も、値を省略せずここに表示する）。
+  const planSgaHtml = PLAN_SGA_FIELD_DEFS.map(f=>
+    data.plansViewList.map(p=>
+      `<li><span class="a-label">${escapeHtml(f.label)}（${escapeHtml(p.name)}）</span><span class="a-value">${fmtNum(p.sgaByItem[f.id])} 万円</span></li>`
+    ).join('')
+  ).join('');
 
   return `
   <div class="header">
@@ -1282,7 +1291,7 @@ function buildReportHTML(data){
       <h2>前提条件<span class="badge">全プラン共通・表示のみ</span></h2>
       <div class="assumptions-grid">
         <div><h3>売上参考数値</h3><ul class="assumptions-list">${masterSalesHtml}</ul></div>
-        <div><h3>販管費</h3><ul class="assumptions-list">${masterSgaHtml}</ul></div>
+        <div><h3>販管費</h3><ul class="assumptions-list">${masterSgaHtml}${planSgaHtml}</ul></div>
       </div>
     </div>
   </div>`;
