@@ -297,13 +297,13 @@
       break-inside:avoid; page-break-inside:avoid; box-shadow:none;
       border:1px solid var(--border); margin-bottom:3mm; padding:3mm 4mm;
     }
-    /* 月次損益テーブルは複数ページにまたがらせず、必ず1ページ内に収める。取り扱う商品
-       カテゴリ・販管費・補助金/助成金などのチェックボックスで表示行数が変動しても崩れ
-       ないよう、フォントサイズ・行の高さは「全項目を表示した最大パターン（カテゴリ5種
-       ×3セクション＋販管費9項目＋固定行＝ヘッダー込み35行）」を基準に、常にこの1ページ
-       に収まる大きさへ固定している（行数が少ない場合は余白が増えるだけで、崩れることは
-       ない）。
-       月次損益テーブルの次にくる「イニシャルコスト」は、あえて改ページしてテーブルとは
+    /* 月次損益テーブルは必ず単独の1ページを使う（サマリー・グラフなど前のカードの
+       残り高さに左右されず、常に用紙いっぱいに表示するため）。行数はJS側
+       (adjustMonthlyTableForPrint関数)で数えて、その1ページに収まりつつ
+       できるだけ余白なく広がるよう、行の余白(--print-table-vpadding)を
+       印刷直前に動的に計算している。文字サイズ自体は読みやすさを優先し固定。 */
+    .monthly-table-card{ break-before:page; page-break-before:always; }
+    /* 月次損益テーブルの次にくる「イニシャルコスト」も、あえて改ページしてテーブルとは
        別ページに切り出し、代わりに（全プランの後に1回だけ出る）「前提条件」カードと
        同じページにまとめる。イニシャルコスト自体は数行程度、前提条件も最大構成で
        十数項目程度と、どちらも十分小さいため同じページに収まる。 */
@@ -323,10 +323,14 @@
     .composition-chart-wrap, .chart-wrap{ break-inside:avoid; }
 
     .table-scroll{ overflow:visible !important; max-height:none !important; border:none; }
-    table{ min-width:0 !important; width:100%; table-layout:auto; font-size:7px; line-height:1.2; }
-    thead th{ position:static; padding:1.5px 3px; }
-    tbody th{ position:static; padding:1.5px 3px; background:#f0f2f6 !important; }
-    tbody td{ padding:1.5px 3px; }
+    /* font-sizeは読みやすさを優先した固定値。行の余白(--print-table-vpadding)だけを
+       adjustMonthlyTableForPrint()が行数に応じて動的に広げ縮めして、行数が少ない
+       プランでも表が1ページいっぱいに広がって見えるようにしている
+       （変数が未設定の場合のフォールバック値は2px）。 */
+    table{ min-width:0 !important; width:100%; table-layout:auto; font-size:10px; line-height:1.3; }
+    thead th{ position:static; padding:var(--print-table-vpadding, 2px) 3px; }
+    tbody th{ position:static; padding:var(--print-table-vpadding, 2px) 3px; background:#f0f2f6 !important; }
+    tbody td{ padding:var(--print-table-vpadding, 2px) 3px; }
 
     .assumptions-grid{ grid-template-columns:repeat(4, 1fr) !important; }
     /* イニシャルコストのリストは（前提条件と違って）中身が1列だけなので、上の4列指定
@@ -1223,7 +1227,7 @@ function buildPlanPanelHTML(p, isActive){
     </div>
     ${compositionCardHtml}
     ${trendChartCardHtml}
-    <div class="card">
+    <div class="card monthly-table-card">
       <h2>月次損益テーブル</h2>
       <div class="table-scroll">
         <table>
@@ -1761,10 +1765,44 @@ document.getElementById('downloadPdfBtn').addEventListener('click', ()=>{
 // 外す必要があり、これはユーザー操作でしかできない）。せめてページタイトル部分だけでも、
 // 常に固定の「損益計算書 作成ツール」ではなく、実際の会社名が表示されるように
 // 印刷直前だけdocument.titleを差し替えておく。
+// 月次損益テーブルは印刷時、必ず単独の1ページを使う（CSS側の.monthly-table-cardに
+// break-before:pageを指定済み）。ただし取り扱う商品カテゴリ・販管費・補助金/助成金
+// などのチェックボックスで表示行数がプランごとに変わるため、文字サイズを固定のまま
+// にすると行数が少ないプランでは表の下に余白が余ってしまう。そこで印刷の直前に、
+// 実際の行数から「その1ページにちょうど収まる行の余白（上下パディング）」を逆算し、
+// CSS変数(--print-table-vpadding)として設定することで、行数によらず表が常に
+// 用紙いっぱいに広がって見えるようにしている（文字サイズ自体は読みやすさを優先し
+// 固定のまま変えない）。
+function adjustMonthlyTableForPrint(){
+  const card = document.querySelector('.plan-panel.active .monthly-table-card');
+  const table = card && card.querySelector('table');
+  if(!table) return;
+  const rowCount = table.querySelectorAll('tbody tr').length + 1; // +1 はthead分
+  if(rowCount <= 0) return;
+
+  // A4横向き・@pageのmargin10mmから求めた、1ページの使用可能な高さ(px, 96dpi換算)。
+  // そこから月次損益テーブルのカード自身が使う「見出し(h2)＋カードのpadding＋枠線」
+  // ぶんの目安を差し引いた残りが、テーブル本体に使える高さになる。
+  const PAGE_USABLE_HEIGHT_PX = 718; // 190mm ≒ 718px
+  const CARD_CHROME_PX = 60;
+  const available = Math.max(PAGE_USABLE_HEIGHT_PX - CARD_CHROME_PX, 200);
+
+  const fontSizePx = 10; // table{font-size:10px}（印刷用CSS）と合わせる
+  const lineHeight = 1.3;
+  const borderPx = 1; // 行の下罫線ぶん
+  const textHeight = fontSizePx * lineHeight;
+  const idealRowHeight = available / rowCount;
+  // 上下パディング合計 = 行の目標高さ - 文字の高さ - 罫線。それを上下に均等配分する。
+  let vPadding = (idealRowHeight - textHeight - borderPx) / 2;
+  vPadding = Math.max(1, Math.min(vPadding, 14)); // 詰まり過ぎ・間延びし過ぎを防ぐ
+
+  document.documentElement.style.setProperty('--print-table-vpadding', vPadding.toFixed(2) + 'px');
+}
 window.addEventListener('beforeprint', function(){
   window.__printTitleBackup = document.title;
   const data = window.__lastReportData;
   document.title = data && data.companyName ? `${data.companyName}_損益計算書` : '損益計算書';
+  adjustMonthlyTableForPrint();
 });
 window.addEventListener('afterprint', function(){
   if(window.__printTitleBackup !== undefined){ document.title = window.__printTitleBackup; delete window.__printTitleBackup; }
