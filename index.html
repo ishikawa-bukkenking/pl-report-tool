@@ -1265,12 +1265,13 @@ function buildReportHTML(data){
   const masterSgaHtml = CURRENT_SGA_FIELDS.map(f=>
     `<li><span class="a-label">${f.label}</span><span class="a-value">${fmtNum(data.master.sga[f.id])} 万円</span></li>`).join('');
   // PPC広告運用サポート費用は、全プラン共通の販管費とは違いプランごとに金額が異なる
-  // （PLAN_SGA_FIELD_DEFS）ため、上のmasterSgaHtmlとは別に、プラン名を添えた行として
-  // 1プランにつき1行ずつ追加する（前提条件カードは「全プラン共通」の項目が基本だが、
-  // このように一部の項目だけプラン別の値になる場合も、値を省略せずここに表示する）。
+  // （PLAN_SGA_FIELD_DEFS）。3プラン分を全部並べて表示するとどのプランの値か分かり
+  // づらいため、プランごとに1行ずつ用意した上で、現在選択中のプランの行だけを表示し
+  // 他は非表示にしておく（初期状態は1番目＝タブの初期選択と合わせる）。プランタブを
+  // 切り替えたときにも連動して表示を切り替える処理をREPORT_JS()側に追加している。
   const planSgaHtml = PLAN_SGA_FIELD_DEFS.map(f=>
-    data.plansViewList.map(p=>
-      `<li><span class="a-label">${escapeHtml(f.label)}（${escapeHtml(p.name)}）</span><span class="a-value">${fmtNum(p.sgaByItem[f.id])} 万円</span></li>`
+    data.plansViewList.map((p,i)=>
+      `<li class="plan-specific-assumption" data-plan="${escapeHtml(p.key)}"${i===0?'':' style="display:none;"'}><span class="a-label">${escapeHtml(f.label)}</span><span class="a-value">${fmtNum(p.sgaByItem[f.id])} 万円</span></li>`
     ).join('')
   ).join('');
 
@@ -1311,6 +1312,11 @@ function REPORT_JS(){
       root.querySelectorAll('.plan-panel').forEach(p=>p.classList.remove('active'));
       tab.classList.add('active');
       root.querySelector(`.plan-panel[data-plan="${tab.dataset.plan}"]`).classList.add('active');
+      // 前提条件カードのPPC広告運用サポート費用も、選択中のプランの行だけ表示する
+      // （プランごとに金額が異なるため）。
+      root.querySelectorAll('.plan-specific-assumption').forEach(li=>{
+        li.style.display = (li.dataset.plan === tab.dataset.plan) ? '' : 'none';
+      });
       resizeActiveChart();
     });
   });
