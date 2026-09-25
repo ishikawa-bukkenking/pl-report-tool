@@ -184,6 +184,11 @@
   .assumptions-list li .a-label{ color:var(--text-muted); flex:1; min-width:0; padding-right:10px; }
   .assumptions-list li .a-value{ font-weight:700; color:var(--heading); white-space:nowrap; flex-shrink:0; }
   .assumptions-list li .a-value.neg{ color:var(--neg); }
+  /* イニシャルコストの最後に出す「合計」行：他の項目と見分けやすいよう、
+     二重の上罫線と背景色を付けて強調する。 */
+  .assumptions-list li.a-total{ border-bottom:none; border-top:3px double var(--border); margin-top:4px; padding-top:10px; }
+  .assumptions-list li.a-total .a-label{ color:var(--heading); font-weight:700; }
+  .assumptions-list li.a-total .a-value{ font-size:15px; }
 
   .plan-panel{ display:none; }
   .plan-panel.active{ display:block; }
@@ -548,6 +553,9 @@ let CURRENT_INQUIRY_ENABLED = false;
 let CURRENT_INQUIRY_MONTHLY = INQUIRY_MONTHLY_DEFAULT;
 let CURRENT_INQUIRY_Y1 = 0;
 let CURRENT_INQUIRY_Y2 = 0;
+// 月次損益テーブルにも反響数の行を出せるよう、24ヶ月分の配列そのものも保持しておく
+// （全プラン共通の値なので、buildTableSections(p)からプランを問わずそのまま参照する）。
+let CURRENT_INQUIRY_MONTHLY_ARR = Array(24).fill(0);
 
 // 月別件数の初期値は、物件王の標準テンプレートExcel（損益計算書_株式会社テンプレート様）の
 // 実際の入力値（ライト/ベーシック/スタンダード各シートの売上件数内訳）をそのまま反映している。
@@ -1032,17 +1040,18 @@ function computeReportData(){
   CURRENT_INQUIRY_MONTHLY = Math.max(0, readNum('inquiry_monthly', INQUIRY_MONTHLY_DEFAULT));
   CURRENT_INQUIRY_Y1 = 0;
   CURRENT_INQUIRY_Y2 = 0;
+  CURRENT_INQUIRY_MONTHLY_ARR = Array(24).fill(0);
   if(inquiryEnabled){
     const baseMonthly = CURRENT_INQUIRY_MONTHLY;
-    const inquiryMonthly = Array.from({length:24}, (_,idx)=>{
+    CURRENT_INQUIRY_MONTHLY_ARR = Array.from({length:24}, (_,idx)=>{
       const m = idx + 1;
       let rate = 1;
       if(m <= 3) rate = 0.5;
       else if(m <= 6) rate = 0.8;
       return baseMonthly * rate;
     });
-    CURRENT_INQUIRY_Y1 = inquiryMonthly.slice(0,12).reduce((a,b)=>a+b,0);
-    CURRENT_INQUIRY_Y2 = inquiryMonthly.slice(12,24).reduce((a,b)=>a+b,0);
+    CURRENT_INQUIRY_Y1 = CURRENT_INQUIRY_MONTHLY_ARR.slice(0,12).reduce((a,b)=>a+b,0);
+    CURRENT_INQUIRY_Y2 = CURRENT_INQUIRY_MONTHLY_ARR.slice(12,24).reduce((a,b)=>a+b,0);
   }
 
   PLAN_DEFS.forEach(p=>{
@@ -1208,7 +1217,14 @@ function buildCompositionLegendRows(comp){
     </li>`).join('');
 }
 function buildTableSections(p){
+  // 反響数は全プラン共通の値（CURRENT_INQUIRY_MONTHLY_ARR）なので、プランごとの
+  // 集計値ではなくモジュール変数をそのまま参照する。チェックが外れていれば
+  // セクションごと出さない。
+  const inquirySection = CURRENT_INQUIRY_ENABLED
+    ? [{title:'反響数（件）', rows:[{label:'反響数', cells:buildCells(CURRENT_INQUIRY_MONTHLY_ARR)}]}]
+    : [];
   return [
+    ...inquirySection,
     {title:'売上件数内訳（件）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.countLabel, cells:buildCells(p.countsByCat[cat.key])}))},
     {title:'売上内訳（万円）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.salesByCat[cat.key])}))},
     {title:null, rows:[{label:'売上合計(A)', rowClass:'total-row', cells:buildCells(p.salesTotal)}]},
@@ -1271,14 +1287,21 @@ function buildPlanPanelHTML(p, isActive){
       <div class="chart-wrap"><canvas id="chart-${p.key}"></canvas></div>
     </div>` : '';
 
-  const initialRows = INITIAL_COST_DEFS.concat(SHARED_INITIAL_COST_DEFS)
+  const initialDefsVisible = INITIAL_COST_DEFS.concat(SHARED_INITIAL_COST_DEFS)
     .filter(ic => CURRENT_INITIAL_VISIBLE[ic.key] !== false)
-    .concat(CURRENT_DYNAMIC_INITIAL_DEFS)
-    .map(ic=>{
+    .concat(CURRENT_DYNAMIC_INITIAL_DEFS);
+  const initialRows = initialDefsVisible.map(ic=>{
       const v = p.initial[ic.key];
       const isNeg = v < 0;
       return `<li><span class="a-label">${ic.label}</span><span class="a-value${isNeg ? ' neg' : ''}">${v ? fmtNum(v) + ' 万円' : '—'}</span></li>`;
-    }).join('');
+    }).join('')
+    // イニシャルコストの最後に、表示中の全項目（控除のマイナス値も含む）を合計した
+    // 行を追加する。助成金の控除がある場合はその分差し引かれた実質負担額になる。
+    + (()=>{
+      const total = initialDefsVisible.reduce((s,ic)=> s + (p.initial[ic.key] || 0), 0);
+      const isNeg = total < 0;
+      return `<li class="a-total"><span class="a-label">合計</span><span class="a-value${isNeg ? ' neg' : ''}">${fmtNum(total)} 万円</span></li>`;
+    })();
 
   // 反響数（1年目・2年目の合計）をサマリーの先頭に追加する。チェックが外れている
   // 場合は他のスタットと同様にタイル自体を出さない。
