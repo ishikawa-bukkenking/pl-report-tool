@@ -344,9 +344,9 @@
        ページに収まらなくなることがあった。イニシャルコストのカードだけは1列（フル
        幅）に戻し、折り返しを抑えて高さを詰める。 */
     .initial-cost-card .assumptions-grid{ grid-template-columns:1fr !important; }
-    /* 助成金の内訳カードは中身が2グループだけなので、4列指定のままだと右半分が
-       余ってスカスカに見える。自然な2列に戻す。 */
-    .grant-breakdown-card .assumptions-grid{ grid-template-columns:repeat(2, 1fr) !important; }
+    /* 助成金の内訳カードは中身が1グループだけなので、4列指定のままだと大部分が
+       余ってスカスカに見える。自然な1列（フル幅）に戻す。 */
+    .grant-breakdown-card .assumptions-grid{ grid-template-columns:1fr !important; }
     .assumptions-list li{ font-size:11px !important; padding:3px 0 !important; }
   }
 </style>
@@ -374,8 +374,8 @@
       <h2>2. 前提条件（単価・粗利率・販管費）</h2>
       <div class="hint">3プラン共通の前提です。物件王の標準的な数値を初期値として入れているので、必要な項目だけ書き換えてください。</div>
       <div class="builder-subhead">反響数</div>
-      <div class="hint" style="margin-bottom:12px;">チェックを入れると、レポートのサマリー・前提条件に反響数（見込み客からの問い合わせ件数）の目安を表示します。開業直後は立ち上がりに時間がかかるため、入力した年間件数をもとに1〜3ヶ月目は50%、4〜6ヶ月目は80%、7ヶ月目以降（2年目含む）は100%の件数で自動計算します。</div>
-      <div class="field-grid" id="inquiryFields" style="margin-bottom:18px;"></div>
+      <div class="hint" style="margin-bottom:12px;">チェックを入れると、レポートのサマリー・前提条件に反響数（見込み客からの問い合わせ件数）の目安を表示します。入力するのは「毎月の反響数」です。開業直後は立ち上がりに時間がかかるため、1〜3ヶ月目は入力した数値の50%、4〜6ヶ月目は80%、7ヶ月目以降（2年目含む）は100%の件数で自動計算します。</div>
+      <div class="field-grid" id="inquiryFields" style="margin-bottom:18px; grid-template-columns:minmax(180px,220px);"></div>
       <div class="builder-subhead">取り扱う商品カテゴリ</div>
       <div class="hint" style="margin-bottom:12px;">チェックを外すと、そのカテゴリは月別件数の入力欄・レポートの各表・売上構成グラフに表示されなくなります（仲介手数料・建築紹介は常に表示されます）。</div>
       <div class="field-grid" id="categoryToggles" style="margin-bottom:18px;"></div>
@@ -539,13 +539,13 @@ let CURRENT_DYNAMIC_INITIAL_DEFS = [];
 let CURRENT_EMPLOYMENT_GRANT_ENABLED = false;
 let CURRENT_EMPLOYMENT_GRANT_HEADCOUNT = 1;
 
-// 反響数（見込み客からの問い合わせ件数）：全プラン共通の年間目安件数を入力すると、
-// 開業直後の立ち上がりを考慮した月別の目安値を自動計算する（1〜3ヶ月目は50%、
+// 反響数（見込み客からの問い合わせ件数）：全プラン共通の「毎月の件数」を入力すると、
+// 開業直後の立ち上がりを考慮した月別の目安値を自動計算する（1〜3ヶ月目は入力値の50%、
 // 4〜6ヶ月目は80%、7ヶ月目以降・2年目は100%）。チェックボックスで表示有無を選べる
 // （デフォルトはON）。
-const INQUIRY_ANNUAL_DEFAULT = 20;
+const INQUIRY_MONTHLY_DEFAULT = 20;
 let CURRENT_INQUIRY_ENABLED = false;
-let CURRENT_INQUIRY_ANNUAL = INQUIRY_ANNUAL_DEFAULT;
+let CURRENT_INQUIRY_MONTHLY = INQUIRY_MONTHLY_DEFAULT;
 let CURRENT_INQUIRY_Y1 = 0;
 let CURRENT_INQUIRY_Y2 = 0;
 
@@ -760,14 +760,14 @@ function showTrendChartEnabled(){
   return checkbox ? checkbox.checked : true;
 }
 
-// 反響数（見込み客からの問い合わせ件数）のチェックボックス＋年間件数入力を組み立てる。
-// デフォルトはON・年間20件。月別への按分（50%/80%/100%）はcomputeReportData()側で行う。
+// 反響数（見込み客からの問い合わせ件数）のチェックボックス＋毎月の件数入力を組み立てる。
+// デフォルトはON・毎月20件。月別の立ち上がり按分（50%/80%/100%）はcomputeReportData()側で行う。
 function buildInquiryToggle(){
   const wrap = document.getElementById('inquiryFields');
   if(!wrap) return;
   wrap.insertAdjacentHTML('beforeend',
-    buildOptionalField('inquiry_enable', 'inquiry_annual', '反響数を表示する（年間件数）', INQUIRY_ANNUAL_DEFAULT, '件／年', true));
-  wireOptionalField('inquiry_enable', 'inquiry_annual');
+    buildOptionalField('inquiry_enable', 'inquiry_monthly', '反響数を表示する（毎月の件数）', INQUIRY_MONTHLY_DEFAULT, '件／月', true));
+  wireOptionalField('inquiry_enable', 'inquiry_monthly');
 }
 
 // 補助金（デジタル化・AI導入補助金）・助成金のチェックボックスを組み立てる。
@@ -964,8 +964,26 @@ function computeReportData(){
   CURRENT_SHOW_COMPOSITION = showCompositionChartEnabled();
   CURRENT_SHOW_TREND_CHART = showTrendChartEnabled();
 
+  // 人材開発支援助成金（助成金）のチェック状態を、他の計算より先に確定させておく。
+  // チェックが入っている間は、レポート内のすべての金額（万円）を税込表記にする
+  // （taxMulを掛けるだけの単純な一律スケーリングなので、売上・原価・粗利・販管費・
+  // 営業利益・累計損益のように互いに差し引き関係にある値同士でも、比率はそのまま
+  // 保たれる＝税抜のときと同じ整合性が保たれる）。
+  const employmentGrantEnabled = document.getElementById('employment_grant_enable')?.checked;
+  CURRENT_EMPLOYMENT_GRANT_ENABLED = !!employmentGrantEnabled;
+  CURRENT_EMPLOYMENT_GRANT_HEADCOUNT = Math.max(1, readNum('employment_grant_headcount', 1));
+  const taxMul = CURRENT_EMPLOYMENT_GRANT_ENABLED ? 1.1 : 1;
+
   const companyName = (document.getElementById('companyNameInput').value || '').trim() || '株式会社○○　御中';
   const master = readMaster();
+  // 単価（万円）はそのままtaxMulを掛ける。粗利率（%）は税とは無関係なので触らない。
+  // 販管費（master.sga）もすべて金額なので同様にスケーリングする。ここで master を
+  // 直接書き換えておくことで、以降このmasterを参照するすべての計算・表示
+  // （前提条件カードの売上参考数値・販管費欄も含む）に自動的に反映される。
+  if(taxMul !== 1){
+    SALES_FIELD_DEFS.forEach(f=>{ if(f.type !== 'margin') master[f.id] *= taxMul; });
+    Object.keys(master.sga).forEach(k=>{ master.sga[k] *= taxMul; });
+  }
   const chartByPlan = {};
   const plansViewList = [];
 
@@ -981,42 +999,41 @@ function computeReportData(){
       visible = checkbox ? checkbox.checked : false;
     }
     CURRENT_INITIAL_VISIBLE[f.key] = visible;
-    sharedInitial[f.key] = visible ? readNum(`shared_initial_${f.key}`, f.default) : 0;
+    sharedInitial[f.key] = visible ? readNum(`shared_initial_${f.key}`, f.default) * taxMul : 0;
   });
 
   // 補助金（デジタル化・AI導入補助金）・助成金：チェックが入っていれば、控除額（マイナス）と
   // 申請サポート費用（プラス）の2項目を sharedInitial に追加する。マイナス値のまま合算される
-  // ため、累計損益の計算（initialSum差引）にもそのまま正しく反映される。
+  // ため、累計損益の計算（initialSum差引）にもそのまま正しく反映される。助成金が有効な間は
+  // これらの金額にもtaxMulを掛け、「全て税込表記」の方針から漏れないようにしている。
   CURRENT_DYNAMIC_INITIAL_DEFS = [];
   const subsidyGrantEnabled = document.getElementById('subsidy_grant_enable')?.checked;
   if(subsidyGrantEnabled){
-    sharedInitial.subsidy_grant_deduction = -SUBSIDY_GRANT_DEDUCTION;
-    sharedInitial.subsidy_grant_support_fee = SUBSIDY_GRANT_SUPPORT_FEE;
+    sharedInitial.subsidy_grant_deduction = -SUBSIDY_GRANT_DEDUCTION * taxMul;
+    sharedInitial.subsidy_grant_support_fee = SUBSIDY_GRANT_SUPPORT_FEE * taxMul;
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'subsidy_grant_deduction', label: SUBSIDY_GRANT_LABEL});
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'subsidy_grant_support_fee', label:'補助金申請サポート費用'});
   }
-  const employmentGrantEnabled = document.getElementById('employment_grant_enable')?.checked;
-  CURRENT_EMPLOYMENT_GRANT_ENABLED = !!employmentGrantEnabled;
-  CURRENT_EMPLOYMENT_GRANT_HEADCOUNT = Math.max(1, readNum('employment_grant_headcount', 1));
   if(employmentGrantEnabled){
     const headcount = CURRENT_EMPLOYMENT_GRANT_HEADCOUNT;
-    sharedInitial.employment_grant_deduction = -(headcount * EMPLOYMENT_GRANT_PER_PERSON);
-    sharedInitial.employment_grant_support_fee = EMPLOYMENT_GRANT_SUPPORT_FEE;
+    sharedInitial.employment_grant_deduction = -(headcount * EMPLOYMENT_GRANT_PER_PERSON) * taxMul;
+    sharedInitial.employment_grant_support_fee = EMPLOYMENT_GRANT_SUPPORT_FEE * taxMul;
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_deduction', label:`${EMPLOYMENT_GRANT_LABEL}（${headcount}名）`});
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_support_fee', label:'助成金申請サポート費用'});
   }
 
-  // 反響数：チェックが入っていれば年間件数から月別の目安値（24ヶ月分）を自動計算する。
-  // 開業直後は立ち上がりに時間がかかるため、1〜3ヶ月目は50%・4〜6ヶ月目は80%・
-  // 7ヶ月目以降（2年目も含む）は100%の件数として按分する。月ごとに丸めると誤差が
-  // 積み重なるため、端数のまま合計してから最後に1回だけ丸めて表示する。
+  // 反響数：チェックが入っていれば「毎月の件数」から月別の目安値（24ヶ月分）を
+  // 自動計算する。開業直後は立ち上がりに時間がかかるため、1〜3ヶ月目は入力値の
+  // 50%・4〜6ヶ月目は80%・7ヶ月目以降（2年目も含む）は入力値そのまま(100%)を
+  // その月の件数とする。月ごとに丸めると誤差が積み重なるため、端数のまま合計して
+  // から最後に1回だけ丸めて表示する。
   const inquiryEnabled = !!document.getElementById('inquiry_enable')?.checked;
   CURRENT_INQUIRY_ENABLED = inquiryEnabled;
-  CURRENT_INQUIRY_ANNUAL = Math.max(0, readNum('inquiry_annual', INQUIRY_ANNUAL_DEFAULT));
+  CURRENT_INQUIRY_MONTHLY = Math.max(0, readNum('inquiry_monthly', INQUIRY_MONTHLY_DEFAULT));
   CURRENT_INQUIRY_Y1 = 0;
   CURRENT_INQUIRY_Y2 = 0;
   if(inquiryEnabled){
-    const baseMonthly = CURRENT_INQUIRY_ANNUAL / 12;
+    const baseMonthly = CURRENT_INQUIRY_MONTHLY;
     const inquiryMonthly = Array.from({length:24}, (_,idx)=>{
       const m = idx + 1;
       let rate = 1;
@@ -1030,13 +1047,14 @@ function computeReportData(){
 
   PLAN_DEFS.forEach(p=>{
     const initial = { ...sharedInitial };
-    INITIAL_COST_DEFS.forEach(ic=>{ initial[ic.key] = readNum(`plan_${p.slug}_initial_${ic.key}`); });
+    INITIAL_COST_DEFS.forEach(ic=>{ initial[ic.key] = readNum(`plan_${p.slug}_initial_${ic.key}`) * taxMul; });
 
     // PPC広告運用サポート費用など、プランごとに個別入力する販管費項目を読み取り、
-    // 全プラン共通の販管費（master.sga）に上書き合成した「このプラン用のsga」を作る。
+    // 全プラン共通の販管費（master.sga、すでにtaxMul適用済み）に上書き合成した
+    // 「このプラン用のsga」を作る。個別入力分もここでtaxMulを掛けておく。
     const planSga = { ...master.sga };
     PLAN_SGA_FIELD_DEFS.forEach(f=>{
-      planSga[f.id] = readNum(`plan_${p.slug}_sga_${f.id}`, f.defaultByPlan[p.slug] ?? 0);
+      planSga[f.id] = readNum(`plan_${p.slug}_sga_${f.id}`, f.defaultByPlan[p.slug] ?? 0) * taxMul;
     });
 
     // 件数は「月別件数」表（24個の入力欄）から直接読み取る。
@@ -1269,38 +1287,29 @@ function buildPlanPanelHTML(p, isActive){
         <div class="stat"><div class="label">2年目 反響数</div><div class="value">${fmtNum(CURRENT_INQUIRY_Y2)} <span style="font-size:12px;font-weight:400;">件</span></div></div>` : '';
   const summaryTileCount = 7 + (CURRENT_INQUIRY_ENABLED ? 2 : 0);
 
-  // 人材開発支援助成金を活用する場合、助成金の要件（研修費用の開示）に合わせて
-  // 初期費用・年会費を税込金額で示す専用カードを、イニシャルコストの下に追加する。
-  // 研修費用（対象人数×316,800円）・助成金の控除額・申請サポート費用も、ここに
-  // まとめて分かりやすく表示する（イニシャルコスト本体の税別金額・内訳はそのまま）。
+  // 人材開発支援助成金を活用する場合、研修費用（対象人数×316,800円）・助成金の
+  // 控除額・申請サポート費用をまとめて分かりやすく示す専用カードを、イニシャルコスト
+  // の下に追加する。助成金が有効な間はレポート内のすべての金額を税込表記にしている
+  // （computeReportData()側でtaxMulを掛け済みのため、ここでも税込のまま扱う）ので、
+  // 初期費用・年会費を別枠で再掲する必要はなく、研修費用の内訳に絞って表示する。
   const grantBreakdownHtml = CURRENT_EMPLOYMENT_GRANT_ENABLED ? (()=>{
     const headcount = CURRENT_EMPLOYMENT_GRANT_HEADCOUNT;
-    const trainingCost = headcount * TRAINING_COST_PER_PERSON;
-    const deduction = headcount * EMPLOYMENT_GRANT_PER_PERSON;
-    const introTaxIncl = p.initial.intro * 1.1;
-    const annualFeeTaxIncl = p.initial.annual_fee * 1.1;
-    const totalTaxIncl = introTaxIncl + annualFeeTaxIncl;
+    const trainingCost = headcount * TRAINING_COST_PER_PERSON * 1.1;
+    const deduction = headcount * EMPLOYMENT_GRANT_PER_PERSON * 1.1;
+    const supportFee = EMPLOYMENT_GRANT_SUPPORT_FEE * 1.1;
+    const initialYearTotal = p.initial.intro + p.initial.annual_fee;
     return `
     <div class="card grant-breakdown-card">
       <h2>助成金の内訳<span class="badge">${EMPLOYMENT_GRANT_LABEL}</span></h2>
-      <div class="hint" style="margin-bottom:14px;">助成金の要件に合わせ、初期費用・年会費は税込金額で表示しています（他の金額はすべて税別です）。</div>
+      <div class="hint" style="margin-bottom:14px;">助成金の要件に合わせ、このレポートの金額はすべて税込表記にしています。</div>
       <div class="assumptions-grid">
         <div>
-          <h3>初期費用（税込）</h3>
           <ul class="assumptions-list">
-            <li><span class="a-label">初期</span><span class="a-value">${fmtNum(introTaxIncl)} 万円</span></li>
-            <li><span class="a-label">会費</span><span class="a-value">${fmtNum(annualFeeTaxIncl)} 万円</span></li>
-            <li><span class="a-label">初年度合計</span><span class="a-value">${fmtNum(totalTaxIncl)} 万円</span></li>
+            <li><span class="a-label">研修費用（${headcount}名 × ${TRAINING_COST_PER_PERSON}万円 × 税込）</span><span class="a-value">${fmtNum(trainingCost)} 万円</span></li>
+            <li><span class="a-label">助成金（${headcount}名 × ${EMPLOYMENT_GRANT_PER_PERSON}万円 × 税込）</span><span class="a-value neg">-${fmtNum(deduction)} 万円</span></li>
+            <li><span class="a-label">申請サポート費用</span><span class="a-value">${fmtNum(supportFee)} 万円</span></li>
           </ul>
-          <div class="hint" style="margin-top:8px;">うち、研修費用として（${fmtNum(trainingCost)}万円）を含む</div>
-        </div>
-        <div>
-          <h3>研修費用・助成金・申請サポート費用</h3>
-          <ul class="assumptions-list">
-            <li><span class="a-label">研修費用（${headcount}名 × ${TRAINING_COST_PER_PERSON}万円）</span><span class="a-value">${fmtNum(trainingCost)} 万円</span></li>
-            <li><span class="a-label">助成金（${headcount}名 × ${EMPLOYMENT_GRANT_PER_PERSON}万円）</span><span class="a-value neg">-${fmtNum(deduction)} 万円</span></li>
-            <li><span class="a-label">申請サポート費用</span><span class="a-value">${fmtNum(EMPLOYMENT_GRANT_SUPPORT_FEE)} 万円</span></li>
-          </ul>
+          <div class="hint" style="margin-top:8px;">うち、初年度のイニシャルコスト（${fmtNum(initialYearTotal)}万円）に研修費用として（${fmtNum(trainingCost)}万円）を含む</div>
         </div>
       </div>
     </div>`;
@@ -1386,14 +1395,16 @@ function buildReportHTML(data){
   // 反響数は前提条件の1番最初のグループとして表示する（チェックが外れていれば省く）。
   const inquiryAssumptionHtml = CURRENT_INQUIRY_ENABLED ? `
         <div><h3>反響数</h3><ul class="assumptions-list">
-          <li><span class="a-label">反響数（年間目安）</span><span class="a-value">${fmtNum(CURRENT_INQUIRY_ANNUAL)} 件</span></li>
+          <li><span class="a-label">反響数（毎月の目安）</span><span class="a-value">${fmtNum(CURRENT_INQUIRY_MONTHLY)} 件</span></li>
           <li><span class="a-label">1年目計</span><span class="a-value">${fmtNum(CURRENT_INQUIRY_Y1)} 件</span></li>
           <li><span class="a-label">2年目計</span><span class="a-value">${fmtNum(CURRENT_INQUIRY_Y2)} 件</span></li>
         </ul></div>` : '';
 
+  const taxNoteText = CURRENT_EMPLOYMENT_GRANT_ENABLED ? '表示金額はすべて税込です' : '表示金額はすべて税別です';
+
   return `
   <div class="header">
-    <div class="tax-note">表示金額はすべて税別です</div>
+    <div class="tax-note">${taxNoteText}</div>
     <div class="header-inner">
       <div class="report-title-row">
         <span class="report-company">${companyNameEsc}</span>
@@ -1630,7 +1641,7 @@ function captureInputSnapshot(){
   { const el = document.getElementById('employment_grant_enable'); if(el) snap.employmentGrantEnabled = el.checked; }
   { const el = document.getElementById('employment_grant_headcount'); if(el) snap.employmentGrantHeadcount = el.value; }
   { const el = document.getElementById('inquiry_enable'); if(el) snap.inquiryEnabled = el.checked; }
-  { const el = document.getElementById('inquiry_annual'); if(el) snap.inquiryAnnual = el.value; }
+  { const el = document.getElementById('inquiry_monthly'); if(el) snap.inquiryMonthly = el.value; }
   PLAN_DEFS.forEach(p=>{
     const planSnap = { initial: {}, sga: {}, counts: {} };
     INITIAL_COST_DEFS.forEach(ic=>{ const el = document.getElementById(`plan_${p.slug}_initial_${ic.key}`); if(el) planSnap.initial[ic.key] = el.value; });
@@ -1686,10 +1697,10 @@ function applyInputSnapshot(snap){
     const headcountInput = document.getElementById('employment_grant_headcount');
     if(headcountInput) headcountInput.disabled = !snap.employmentGrantEnabled;
   }
-  if(snap.inquiryAnnual !== undefined) setVal('inquiry_annual', snap.inquiryAnnual);
+  if(snap.inquiryMonthly !== undefined) setVal('inquiry_monthly', snap.inquiryMonthly);
   if(snap.inquiryEnabled !== undefined){
     setChecked('inquiry_enable', snap.inquiryEnabled);
-    const inquiryInput = document.getElementById('inquiry_annual');
+    const inquiryInput = document.getElementById('inquiry_monthly');
     if(inquiryInput) inquiryInput.disabled = !snap.inquiryEnabled;
   }
   recalcWelfareDisplay();
