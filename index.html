@@ -534,13 +534,19 @@ const EMPLOYMENT_GRANT_LABEL = '人材開発支援助成金　事業展開等リ
 // 人材開発支援助成金を活用する場合、研修費用として「対象人数×316,800円」を計上する
 // 必要がある（助成金の要件上の開示項目）。316,800円 = 31.68万円。
 const TRAINING_COST_PER_PERSON = 31.68; // 万円（=316,800円）
+// 助成金の内訳カードに「うち、BKマネージャー導入費用として◯◯万円を含む」と明記する
+// ための、BKマネージャー導入費用の金額（万円・税別）。物件王初期費用に含まれる
+// 固定費用で、プランによらず一定。
+const BK_MANAGER_SETUP_COST = 330; // 万円（研修費用と同様、内数として明記する固定額）
 // レポートの「イニシャルコスト」に表示する項目定義。computeReportData()の先頭で
 // チェックボックスの状態に応じて毎回作り直す（項目自体が存在しない場合は空配列）。
 let CURRENT_DYNAMIC_INITIAL_DEFS = [];
-// 助成金（人材開発支援助成金）が有効かどうか・対象人数。イニシャルコストカードの
-// 下に出す「助成金の内訳」カード（税込表記・研修費用の内訳）はプランごとの
-// buildPlanPanelHTML()内で組み立てるため、computeReportData()の先頭で
-// このモジュール変数に反映しておく（CURRENT_SGA_FIELDS等と同じやり方）。
+// 補助金（デジタル化・AI導入補助金）・助成金（人材開発支援助成金）が有効かどうか・
+// 対象人数。イニシャルコストカードの下に出す「助成金の内訳」カード（税込表記・
+// 研修費用の内訳）はプランごとのbuildPlanPanelHTML()内で組み立てるため、
+// computeReportData()の先頭でこのモジュール変数に反映しておく
+// （CURRENT_SGA_FIELDS等と同じやり方）。
+let CURRENT_SUBSIDY_GRANT_ENABLED = false;
 let CURRENT_EMPLOYMENT_GRANT_ENABLED = false;
 let CURRENT_EMPLOYMENT_GRANT_HEADCOUNT = 1;
 
@@ -592,6 +598,13 @@ const PLAN_DEFS = [
 function fmtNum(n){
   if (n === null || n === undefined || isNaN(n)) return '';
   return Math.round(n).toLocaleString('ja-JP');
+}
+// 助成金の内訳カードの研修費用・BKマネージャー導入費用のように、整数に丸めず
+// 小数点以下の端数（例：316.8）までそのまま見せたい金額専用のフォーマッタ。
+// 小数第2位までにとどめ、末尾の不要な0は付けない（330は「330」のまま）。
+function fmtDecimal(n){
+  if (n === null || n === undefined || isNaN(n)) return '';
+  return n.toLocaleString('ja-JP', {maximumFractionDigits:2});
 }
 function escapeHtml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -973,10 +986,10 @@ function computeReportData(){
   CURRENT_SHOW_TREND_CHART = showTrendChartEnabled();
 
   // 人材開発支援助成金（助成金）のチェック状態を、他の計算より先に確定させておく。
-  // チェックが入っている間は、レポート内のすべての金額（万円）を税込表記にする
-  // （taxMulを掛けるだけの単純な一律スケーリングなので、売上・原価・粗利・販管費・
-  // 営業利益・累計損益のように互いに差し引き関係にある値同士でも、比率はそのまま
-  // 保たれる＝税抜のときと同じ整合性が保たれる）。
+  // チェックが入っている間、税込表記にするのは「イニシャルコスト」に関わる金額
+  // （物件王初期費用・年会費・宅建関連の共通初期費用・補助金/助成金の控除額と
+  // 申請サポート費用）だけに限定する。売上・原価・粗利・販管費・営業利益・累計
+  // 損益・単価などレポートの他の金額は、これまで通り税別のまま変えない。
   const employmentGrantEnabled = document.getElementById('employment_grant_enable')?.checked;
   CURRENT_EMPLOYMENT_GRANT_ENABLED = !!employmentGrantEnabled;
   CURRENT_EMPLOYMENT_GRANT_HEADCOUNT = Math.max(1, readNum('employment_grant_headcount', 1));
@@ -984,14 +997,6 @@ function computeReportData(){
 
   const companyName = (document.getElementById('companyNameInput').value || '').trim() || '株式会社○○　御中';
   const master = readMaster();
-  // 単価（万円）はそのままtaxMulを掛ける。粗利率（%）は税とは無関係なので触らない。
-  // 販管費（master.sga）もすべて金額なので同様にスケーリングする。ここで master を
-  // 直接書き換えておくことで、以降このmasterを参照するすべての計算・表示
-  // （前提条件カードの売上参考数値・販管費欄も含む）に自動的に反映される。
-  if(taxMul !== 1){
-    SALES_FIELD_DEFS.forEach(f=>{ if(f.type !== 'margin') master[f.id] *= taxMul; });
-    Object.keys(master.sga).forEach(k=>{ master.sga[k] *= taxMul; });
-  }
   const chartByPlan = {};
   const plansViewList = [];
 
@@ -1012,19 +1017,22 @@ function computeReportData(){
 
   // 補助金（デジタル化・AI導入補助金）・助成金：チェックが入っていれば、控除額（マイナス）と
   // 申請サポート費用（プラス）の2項目を sharedInitial に追加する。マイナス値のまま合算される
-  // ため、累計損益の計算（initialSum差引）にもそのまま正しく反映される。助成金が有効な間は
-  // これらの金額にもtaxMulを掛け、「全て税込表記」の方針から漏れないようにしている。
+  // ため、累計損益の計算（initialSum差引）にもそのまま正しく反映される。控除額（補助金・
+  // 助成金として受け取る側の金額）には消費税がかからないため、税込化(taxMul)の対象には
+  // せず常に決められた金額のまま。申請サポート費用（支払う側のサービス費用）だけ、
+  // 助成金が有効な間はtaxMulを掛けて税込にする。
   CURRENT_DYNAMIC_INITIAL_DEFS = [];
   const subsidyGrantEnabled = document.getElementById('subsidy_grant_enable')?.checked;
+  CURRENT_SUBSIDY_GRANT_ENABLED = !!subsidyGrantEnabled;
   if(subsidyGrantEnabled){
-    sharedInitial.subsidy_grant_deduction = -SUBSIDY_GRANT_DEDUCTION * taxMul;
+    sharedInitial.subsidy_grant_deduction = -SUBSIDY_GRANT_DEDUCTION;
     sharedInitial.subsidy_grant_support_fee = SUBSIDY_GRANT_SUPPORT_FEE * taxMul;
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'subsidy_grant_deduction', label: SUBSIDY_GRANT_LABEL});
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'subsidy_grant_support_fee', label:'補助金申請サポート費用'});
   }
   if(employmentGrantEnabled){
     const headcount = CURRENT_EMPLOYMENT_GRANT_HEADCOUNT;
-    sharedInitial.employment_grant_deduction = -(headcount * EMPLOYMENT_GRANT_PER_PERSON) * taxMul;
+    sharedInitial.employment_grant_deduction = -(headcount * EMPLOYMENT_GRANT_PER_PERSON);
     sharedInitial.employment_grant_support_fee = EMPLOYMENT_GRANT_SUPPORT_FEE * taxMul;
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_deduction', label:`${EMPLOYMENT_GRANT_LABEL}（${headcount}名）`});
     CURRENT_DYNAMIC_INITIAL_DEFS.push({key:'employment_grant_support_fee', label:'助成金申請サポート費用'});
@@ -1056,14 +1064,15 @@ function computeReportData(){
 
   PLAN_DEFS.forEach(p=>{
     const initial = { ...sharedInitial };
+    // イニシャルコスト（物件王初期費用・年会費）は助成金チェック時のみ税込にする。
     INITIAL_COST_DEFS.forEach(ic=>{ initial[ic.key] = readNum(`plan_${p.slug}_initial_${ic.key}`) * taxMul; });
 
     // PPC広告運用サポート費用など、プランごとに個別入力する販管費項目を読み取り、
-    // 全プラン共通の販管費（master.sga、すでにtaxMul適用済み）に上書き合成した
-    // 「このプラン用のsga」を作る。個別入力分もここでtaxMulを掛けておく。
+    // 全プラン共通の販管費（master.sga）に上書き合成した「このプラン用のsga」を作る。
+    // 販管費は月次損益テーブル側の金額なので、イニシャルコストと違い税込化はしない。
     const planSga = { ...master.sga };
     PLAN_SGA_FIELD_DEFS.forEach(f=>{
-      planSga[f.id] = readNum(`plan_${p.slug}_sga_${f.id}`, f.defaultByPlan[p.slug] ?? 0) * taxMul;
+      planSga[f.id] = readNum(`plan_${p.slug}_sga_${f.id}`, f.defaultByPlan[p.slug] ?? 0);
     });
 
     // 件数は「月別件数」表（24個の入力欄）から直接読み取る。
@@ -1310,31 +1319,39 @@ function buildPlanPanelHTML(p, isActive){
         <div class="stat"><div class="label">2年目 反響数</div><div class="value">${fmtNum(CURRENT_INQUIRY_Y2)} <span style="font-size:12px;font-weight:400;">件</span></div></div>` : '';
   const summaryTileCount = 7 + (CURRENT_INQUIRY_ENABLED ? 2 : 0);
 
-  // 人材開発支援助成金を活用する場合、研修費用（対象人数×316,800円）・助成金の
-  // 控除額・申請サポート費用をまとめて分かりやすく示す専用カードを、イニシャルコスト
-  // の下に追加する。助成金が有効な間はレポート内のすべての金額を税込表記にしている
-  // （computeReportData()側でtaxMulを掛け済みのため、ここでも税込のまま扱う）ので、
-  // 初期費用・年会費を別枠で再掲する必要はなく、研修費用の内訳に絞って表示する。
+  // 人材開発支援助成金を活用する場合、助成金申請の書類に合わせた書式（初期・会費・
+  // 初年度合計・申請サポート費用合計、および研修費用/BKマネージャー導入費用の
+  // 内数の明記）で専用カードを、イニシャルコストの下に追加する。税込表記になるのは
+  // イニシャルコストに関わる金額だけ（p.initialはcomputeReportData()側ですでに
+  // 税込化済み）で、他の金額（月次損益テーブル等）は税別のまま変えていない。
   const grantBreakdownHtml = CURRENT_EMPLOYMENT_GRANT_ENABLED ? (()=>{
     const headcount = CURRENT_EMPLOYMENT_GRANT_HEADCOUNT;
-    const trainingCost = headcount * TRAINING_COST_PER_PERSON * 1.1;
-    const deduction = headcount * EMPLOYMENT_GRANT_PER_PERSON * 1.1;
-    const supportFee = EMPLOYMENT_GRANT_SUPPORT_FEE * 1.1;
-    const initialYearTotal = p.initial.intro + p.initial.annual_fee;
+    // 研修費用・BKマネージャー導入費用は助成金の要件上の開示額（固定の内数）なので、
+    // 初期・会費・申請サポート費用のような税込化はせず、決められた金額をそのまま出す。
+    const trainingCost = headcount * TRAINING_COST_PER_PERSON;
+    const bkManagerCost = BK_MANAGER_SETUP_COST;
+    const introTaxIncl = p.initial.intro;
+    const annualFeeTaxIncl = p.initial.annual_fee;
+    const initialYearTotal = introTaxIncl + annualFeeTaxIncl;
+    // 申請サポート費用は、助成金（人材開発支援助成金）と補助金（デジタル化・AI導入
+    // 補助金）の両方にそれぞれ存在する。両方チェックされている場合は両方の金額を
+    // 「、」区切りで並べる（片方だけの場合はその1つだけ）。
+    const supportFees = [];
+    if(CURRENT_SUBSIDY_GRANT_ENABLED) supportFees.push(`${fmtNum(SUBSIDY_GRANT_SUPPORT_FEE * 1.1)}万円`);
+    supportFees.push(`${fmtNum(EMPLOYMENT_GRANT_SUPPORT_FEE * 1.1)}万円`);
     return `
     <div class="card grant-breakdown-card">
       <h2>助成金の内訳<span class="badge">${EMPLOYMENT_GRANT_LABEL}</span></h2>
-      <div class="hint" style="margin-bottom:14px;">助成金の要件に合わせ、このレポートの金額はすべて税込表記にしています。</div>
-      <div class="assumptions-grid">
-        <div>
-          <ul class="assumptions-list">
-            <li><span class="a-label">研修費用（${headcount}名 × ${TRAINING_COST_PER_PERSON}万円 × 税込）</span><span class="a-value">${fmtNum(trainingCost)} 万円</span></li>
-            <li><span class="a-label">助成金（${headcount}名 × ${EMPLOYMENT_GRANT_PER_PERSON}万円 × 税込）</span><span class="a-value neg">-${fmtNum(deduction)} 万円</span></li>
-            <li><span class="a-label">申請サポート費用</span><span class="a-value">${fmtNum(supportFee)} 万円</span></li>
-          </ul>
-          <div class="hint" style="margin-top:8px;">うち、初年度のイニシャルコスト（${fmtNum(initialYearTotal)}万円）に研修費用として（${fmtNum(trainingCost)}万円）を含む</div>
-        </div>
-      </div>
+      <div class="hint" style="margin-bottom:14px;">助成金の要件に合わせ、イニシャルコストの金額は税込表示にしています（他の金額は税別のままです）。</div>
+      <ul class="assumptions-list">
+        <li><span class="a-label">初期</span><span class="a-value">${fmtNum(introTaxIncl)} 万円</span></li>
+        <li><span class="a-label">会費</span><span class="a-value">${fmtNum(annualFeeTaxIncl)} 万円</span></li>
+        <li class="a-total"><span class="a-label">初年度合計</span><span class="a-value">${fmtNum(initialYearTotal)} 万円</span></li>
+        <li><span class="a-label">申請サポート費用合計</span><span class="a-value">${supportFees.join('、')}</span></li>
+      </ul>
+      <div class="hint" style="margin-top:10px;">上記金額のうち、</div>
+      <div class="hint">うち、研修費用として（${fmtDecimal(trainingCost)}万円）を含む</div>
+      <div class="hint">うち、BKマネージャー導入費用（${fmtDecimal(bkManagerCost)}万円）を含む</div>
     </div>`;
   })() : '';
 
@@ -1378,7 +1395,8 @@ function buildPlanPanelHTML(p, isActive){
     </div>
 
     <div class="card initial-cost-card">
-      <h2>イニシャルコスト</h2>
+      <h2>イニシャルコスト${CURRENT_EMPLOYMENT_GRANT_ENABLED ? '<span class="badge">税込</span>' : ''}</h2>
+      ${CURRENT_EMPLOYMENT_GRANT_ENABLED ? '<div class="hint" style="margin-bottom:10px;">助成金の要件に合わせ、この金額は税込表示です（他の金額は税別のままです）。</div>' : ''}
       <div class="assumptions-grid"><div><ul class="assumptions-list">${initialRows}</ul></div></div>
     </div>
     ${grantBreakdownHtml}
@@ -1423,11 +1441,11 @@ function buildReportHTML(data){
           <li><span class="a-label">2年目計</span><span class="a-value">${fmtNum(CURRENT_INQUIRY_Y2)} 件</span></li>
         </ul></div>` : '';
 
-  const taxNoteText = CURRENT_EMPLOYMENT_GRANT_ENABLED ? '表示金額はすべて税込です' : '表示金額はすべて税別です';
-
+  // 助成金チェック時に税込になるのはイニシャルコストの金額だけなので、ヘッダーの
+  // 注記は常に「税別」のままにしておく（例外はイニシャルコストカード側に明記する）。
   return `
   <div class="header">
-    <div class="tax-note">${taxNoteText}</div>
+    <div class="tax-note">表示金額はすべて税別です</div>
     <div class="header-inner">
       <div class="report-title-row">
         <span class="report-company">${companyNameEsc}</span>
