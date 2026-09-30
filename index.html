@@ -1312,6 +1312,23 @@ function buildPlanPanelHTML(p, isActive){
       return `<li class="a-total"><span class="a-label">合計</span><span class="a-value${isNeg ? ' neg' : ''}">${fmtNum(total)} 万円</span></li>`;
     })();
 
+  // イニシャルコストの金額のうち、一部がすでに研修費用・BKマネージャー導入費用に
+  // 充当されていることを明記する（助成金の要件上の開示事項）。研修費用は助成金
+  // （人材開発支援助成金）のチェック時のみ、BKマネージャー導入費用は補助金
+  // （デジタル化・AI導入補助金）のチェック時のみ表示する（それぞれ独立した制度の
+  // 開示なので、対応するチェックボックスだけに連動させる）。
+  const includedCostNotes = [];
+  if(CURRENT_EMPLOYMENT_GRANT_ENABLED){
+    const trainingCost = CURRENT_EMPLOYMENT_GRANT_HEADCOUNT * TRAINING_COST_PER_PERSON;
+    includedCostNotes.push(`うち、研修費用として（${fmtDecimal(trainingCost)}万円）を含む`);
+  }
+  if(CURRENT_SUBSIDY_GRANT_ENABLED){
+    includedCostNotes.push(`うち、BKマネージャー導入費用（${fmtDecimal(BK_MANAGER_SETUP_COST)}万円）を含む`);
+  }
+  const includedCostNotesHtml = includedCostNotes.length
+    ? `<div class="hint" style="margin-top:10px;">上記金額のうち、</div>` + includedCostNotes.map(t=>`<div class="hint">${t}</div>`).join('')
+    : '';
+
   // 反響数（1年目・2年目の合計）をサマリーの先頭に追加する。チェックが外れている
   // 場合は他のスタットと同様にタイル自体を出さない。
   const inquiryStatsHtml = CURRENT_INQUIRY_ENABLED ? `
@@ -1319,39 +1336,19 @@ function buildPlanPanelHTML(p, isActive){
         <div class="stat"><div class="label">2年目 反響数</div><div class="value">${fmtNum(CURRENT_INQUIRY_Y2)} <span style="font-size:12px;font-weight:400;">件</span></div></div>` : '';
   const summaryTileCount = 7 + (CURRENT_INQUIRY_ENABLED ? 2 : 0);
 
-  // 人材開発支援助成金を活用する場合、助成金申請の書類に合わせた書式（初期・会費・
-  // 初年度合計・申請サポート費用合計、および研修費用/BKマネージャー導入費用の
-  // 内数の明記）で専用カードを、イニシャルコストの下に追加する。税込表記になるのは
-  // イニシャルコストに関わる金額だけ（p.initialはcomputeReportData()側ですでに
-  // 税込化済み）で、他の金額（月次損益テーブル等）は税別のまま変えていない。
+  // 人材開発支援助成金を活用する場合、制度の内容（動画講習の受講で研修経費の75%が
+  // 助成されること）と、対象人数に応じた助成額の目安を文章で説明するカードを
+  // イニシャルコストの下に追加する。数値の再掲（初期・会費・申請サポート費用など）は
+  // イニシャルコストカード側にすでにあるため、ここでは制度の説明に絞る。
   const grantBreakdownHtml = CURRENT_EMPLOYMENT_GRANT_ENABLED ? (()=>{
     const headcount = CURRENT_EMPLOYMENT_GRANT_HEADCOUNT;
-    // 研修費用・BKマネージャー導入費用は助成金の要件上の開示額（固定の内数）なので、
-    // 初期・会費・申請サポート費用のような税込化はせず、決められた金額をそのまま出す。
     const trainingCost = headcount * TRAINING_COST_PER_PERSON;
-    const bkManagerCost = BK_MANAGER_SETUP_COST;
-    const introTaxIncl = p.initial.intro;
-    const annualFeeTaxIncl = p.initial.annual_fee;
-    const initialYearTotal = introTaxIncl + annualFeeTaxIncl;
-    // 申請サポート費用は、助成金（人材開発支援助成金）と補助金（デジタル化・AI導入
-    // 補助金）の両方にそれぞれ存在する。両方チェックされている場合は両方の金額を
-    // 「、」区切りで並べる（片方だけの場合はその1つだけ）。
-    const supportFees = [];
-    if(CURRENT_SUBSIDY_GRANT_ENABLED) supportFees.push(`${fmtNum(SUBSIDY_GRANT_SUPPORT_FEE * 1.1)}万円`);
-    supportFees.push(`${fmtNum(EMPLOYMENT_GRANT_SUPPORT_FEE * 1.1)}万円`);
+    const subsidizedAmount = trainingCost * 0.75;
     return `
     <div class="card grant-breakdown-card">
-      <h2>助成金の内訳<span class="badge">${EMPLOYMENT_GRANT_LABEL}</span></h2>
-      <div class="hint" style="margin-bottom:14px;">助成金の要件に合わせ、イニシャルコストの金額は税込表示にしています（他の金額は税別のままです）。</div>
-      <ul class="assumptions-list">
-        <li><span class="a-label">初期</span><span class="a-value">${fmtNum(introTaxIncl)} 万円</span></li>
-        <li><span class="a-label">会費</span><span class="a-value">${fmtNum(annualFeeTaxIncl)} 万円</span></li>
-        <li class="a-total"><span class="a-label">初年度合計</span><span class="a-value">${fmtNum(initialYearTotal)} 万円</span></li>
-        <li><span class="a-label">申請サポート費用合計</span><span class="a-value">${supportFees.join('、')}</span></li>
-      </ul>
-      <div class="hint" style="margin-top:10px;">上記金額のうち、</div>
-      <div class="hint">うち、研修費用として（${fmtDecimal(trainingCost)}万円）を含む</div>
-      <div class="hint">うち、BKマネージャー導入費用（${fmtDecimal(bkManagerCost)}万円）を含む</div>
+      <h2>助成金概要<span class="badge">${EMPLOYMENT_GRANT_LABEL}</span></h2>
+      <div class="hint">人材開発支援助成金（事業展開等リスキリング支援コース）は、新規事業展開や業態転換等にともない、社員に新たな知識・スキルを習得させる研修を実施した企業に対して、研修費用の一部が助成される国の制度です。指定の動画講習（eラーニング）を受講することで、研修経費の75%相当が助成されます。</div>
+      <div class="hint" style="margin-top:10px;">${headcount}名で受講する場合、研修費用${fmtDecimal(trainingCost)}万円のうち、約${fmtDecimal(subsidizedAmount)}万円が助成される計算になります。</div>
     </div>`;
   })() : '';
 
@@ -1398,6 +1395,7 @@ function buildPlanPanelHTML(p, isActive){
       <h2>イニシャルコスト${CURRENT_EMPLOYMENT_GRANT_ENABLED ? '<span class="badge">税込</span>' : ''}</h2>
       ${CURRENT_EMPLOYMENT_GRANT_ENABLED ? '<div class="hint" style="margin-bottom:10px;">助成金の要件に合わせ、この金額は税込表示です（他の金額は税別のままです）。</div>' : ''}
       <div class="assumptions-grid"><div><ul class="assumptions-list">${initialRows}</ul></div></div>
+      ${includedCostNotesHtml}
     </div>
     ${grantBreakdownHtml}
   </div>`;
