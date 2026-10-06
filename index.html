@@ -534,10 +534,6 @@ const EMPLOYMENT_GRANT_LABEL = '人材開発支援助成金　事業展開等リ
 // 人材開発支援助成金を活用する場合、研修費用として「対象人数×316,800円」を計上する
 // 必要がある（助成金の要件上の開示項目）。316,800円 = 31.68万円。
 const TRAINING_COST_PER_PERSON = 31.68; // 万円（=316,800円）
-// 助成金の内訳カードに「うち、BKマネージャー導入費用として◯◯万円を含む」と明記する
-// ための、BKマネージャー導入費用の金額（万円・税別）。物件王初期費用に含まれる
-// 固定費用で、プランによらず一定。
-const BK_MANAGER_SETUP_COST = 330; // 万円（研修費用と同様、内数として明記する固定額）
 // レポートの「イニシャルコスト」に表示する項目定義。computeReportData()の先頭で
 // チェックボックスの状態に応じて毎回作り直す（項目自体が存在しない場合は空配列）。
 let CURRENT_DYNAMIC_INITIAL_DEFS = [];
@@ -1312,21 +1308,10 @@ function buildPlanPanelHTML(p, isActive){
       return `<li class="a-total"><span class="a-label">合計</span><span class="a-value${isNeg ? ' neg' : ''}">${fmtNum(total)} 万円</span></li>`;
     })();
 
-  // イニシャルコストの金額のうち、一部がすでに研修費用・BKマネージャー導入費用に
-  // 充当されていることを明記する（助成金の要件上の開示事項）。研修費用は助成金
-  // （人材開発支援助成金）のチェック時のみ、BKマネージャー導入費用は補助金
-  // （デジタル化・AI導入補助金）のチェック時のみ表示する（それぞれ独立した制度の
-  // 開示なので、対応するチェックボックスだけに連動させる）。
-  const includedCostNotes = [];
-  if(CURRENT_EMPLOYMENT_GRANT_ENABLED){
-    const trainingCost = CURRENT_EMPLOYMENT_GRANT_HEADCOUNT * TRAINING_COST_PER_PERSON;
-    includedCostNotes.push(`うち、研修費用として（${fmtDecimal(trainingCost)}万円）を含む`);
-  }
-  if(CURRENT_SUBSIDY_GRANT_ENABLED){
-    includedCostNotes.push(`うち、BKマネージャー導入費用（${fmtDecimal(BK_MANAGER_SETUP_COST)}万円）を含む`);
-  }
-  const includedCostNotesHtml = includedCostNotes.length
-    ? `<div class="hint" style="margin-top:10px;">上記金額のうち、</div>` + includedCostNotes.map(t=>`<div class="hint">${t}</div>`).join('')
+  // イニシャルコストの金額のうち、一部がすでに研修費用に充当されていることを明記する
+  // （助成金の要件上の開示事項）。助成金（人材開発支援助成金）のチェック時のみ表示する。
+  const includedCostNotesHtml = CURRENT_EMPLOYMENT_GRANT_ENABLED
+    ? `<div class="hint" style="margin-top:10px;">上記金額のうち、</div><div class="hint">うち、研修費用として（${fmtDecimal(CURRENT_EMPLOYMENT_GRANT_HEADCOUNT * TRAINING_COST_PER_PERSON)}万円）を含む</div>`
     : '';
 
   // 反響数（1年目・2年目の合計）をサマリーの先頭に追加する。チェックが外れている
