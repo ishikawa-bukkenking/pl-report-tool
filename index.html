@@ -168,6 +168,12 @@
   thead th{ position:sticky; top:0; background:var(--navy); color:#fff; padding:8px 10px; text-align:right; white-space:nowrap; font-weight:600; z-index:2; }
   thead th:first-child{ text-align:left; left:0; z-index:3; }
   thead th.year-total{ background:var(--accent); color:#fff; }
+  /* 準備期間（開業前）の列：通常の月と見分けやすいよう、ヘッダーはグレー系・本体は薄いグレーにする */
+  thead th.prep-col{ background:#6b7a99; color:#fff; }
+  thead th.prep-col.prep-total{ background:#4a5878; }
+  tbody td.prep-col{ background:#f3f4f8; }
+  tbody td.prep-col.prep-total{ background:#e6e9f1; font-weight:700; }
+  tbody tr.highlight-row td.prep-col{ background:var(--navy); }
   tbody th{ text-align:left; padding:7px 10px; white-space:nowrap; background:var(--surface-alt); position:sticky; left:0; font-weight:500; border-bottom:1px solid var(--border); z-index:1; }
   tbody td{ padding:7px 10px; text-align:right; white-space:nowrap; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; }
   tbody td.year-total{ background:var(--tint); font-weight:700; }
@@ -337,10 +343,10 @@
        adjustMonthlyTableForPrint()が行数に応じて動的に広げ縮めして、行数が少ない
        プランでも表が1ページいっぱいに広がって見えるようにしている
        （変数が未設定の場合のフォールバック値は2px）。 */
-    table{ min-width:0 !important; width:100%; table-layout:auto; font-size:10px; line-height:1.3; }
-    thead th{ position:static; padding:var(--print-table-vpadding, 2px) 3px; }
-    tbody th{ position:static; padding:var(--print-table-vpadding, 2px) 3px; background:#f0f2f6 !important; }
-    tbody td{ padding:var(--print-table-vpadding, 2px) 3px; }
+    table{ min-width:0 !important; width:100%; table-layout:auto; font-size:var(--print-table-font-size, 10px); line-height:1.3; }
+    thead th{ position:static; padding:var(--print-table-vpadding, 2px) var(--print-table-hpadding, 3px); }
+    tbody th{ position:static; padding:var(--print-table-vpadding, 2px) var(--print-table-hpadding, 3px); background:#f0f2f6 !important; }
+    tbody td{ padding:var(--print-table-vpadding, 2px) var(--print-table-hpadding, 3px); }
 
     .assumptions-grid{ grid-template-columns:repeat(4, 1fr) !important; }
     /* イニシャルコストのリストは（前提条件と違って）中身が1列だけなので、上の4列指定
@@ -381,6 +387,9 @@
       <div class="builder-subhead">反響数</div>
       <div class="hint" style="margin-bottom:12px;">チェックを入れると、レポートのサマリー・前提条件に反響数（見込み客からの問い合わせ件数）の目安を表示します。入力するのは「毎月の反響数」です。開業直後は立ち上がりに時間がかかるため、1〜3ヶ月目は入力した数値の50%、4〜6ヶ月目は80%、7ヶ月目以降（2年目含む）は100%の件数で自動計算します。</div>
       <div class="field-grid" id="inquiryFields" style="margin-bottom:18px; grid-template-columns:minmax(180px,220px);"></div>
+      <div class="builder-subhead">準備期間（開業前6ヶ月）</div>
+      <div class="hint" style="margin-bottom:12px;">チェックを入れると、月次損益テーブルの「1ヶ月目」より前に「準備1〜6ヶ月目」の列を追加します。売上・原価・販管費を手入力でき（初期値はすべて0）、入力した内容は営業利益・累計損益にも反映されます。</div>
+      <div id="prepFields" style="margin-bottom:18px;"></div>
       <div class="builder-subhead">取り扱う商品カテゴリ</div>
       <div class="hint" style="margin-bottom:12px;">チェックを外すと、そのカテゴリは月別件数の入力欄・レポートの各表・売上構成グラフに表示されなくなります（仲介手数料・建築紹介は常に表示されます）。</div>
       <div class="field-grid" id="categoryToggles" style="margin-bottom:18px;"></div>
@@ -558,6 +567,18 @@ let CURRENT_INQUIRY_Y2 = 0;
 // 月次損益テーブルにも反響数の行を出せるよう、24ヶ月分の配列そのものも保持しておく
 // （全プラン共通の値なので、buildTableSections(p)からプランを問わずそのまま参照する）。
 let CURRENT_INQUIRY_MONTHLY_ARR = Array(24).fill(0);
+
+// 準備期間（1ヶ月目より前の6ヶ月）：チェックを入れると月次損益テーブルの先頭に
+// 「準備1〜6ヶ月目＋準備期間計」の列を追加する。売上・原価・販管費の合計だけを
+// 手入力でき（初期値はすべて0）、営業利益・累計損益にも反映する。全プラン共通。
+const PREP_MONTHS = 6;
+const PREP_ROWS = [
+  {key:'sales', label:'売上合計(A)'},
+  {key:'cost',  label:'原価合計(B)'},
+  {key:'sga',   label:'販管費合計(C)'},
+];
+let CURRENT_PREP_ENABLED = false;
+let CURRENT_PREP = { sales:Array(PREP_MONTHS).fill(0), cost:Array(PREP_MONTHS).fill(0), sga:Array(PREP_MONTHS).fill(0) };
 
 // 月別件数の初期値は、物件王の標準テンプレートExcel（損益計算書_株式会社テンプレート様）の
 // 実際の入力値（ライト/ベーシック/スタンダード各シートの売上件数内訳）をそのまま反映している。
@@ -785,6 +806,32 @@ function buildInquiryToggle(){
   wrap.insertAdjacentHTML('beforeend',
     buildOptionalField('inquiry_enable', 'inquiry_monthly', '反響数を表示する（毎月の件数）', INQUIRY_MONTHLY_DEFAULT, '件／月', true));
   wireOptionalField('inquiry_enable', 'inquiry_monthly');
+}
+
+// 準備期間（開業前6ヶ月）のチェックボックスと、売上・原価・販管費の手入力表を組み立てる。
+// 入力欄はチェックを入れるまで無効（値はすべて0のまま）。
+function buildPrepUI(){
+  const wrap = document.getElementById('prepFields');
+  if(!wrap) return;
+  const head = Array.from({length:PREP_MONTHS}, (_,i)=>`<th>準備${i+1}ヶ月目</th>`).join('');
+  const rows = PREP_ROWS.map(r=>`<tr><th>${r.label}</th>${
+    Array.from({length:PREP_MONTHS}, (_,i)=>`<td><input type="number" id="prep_${r.key}_${i+1}" value="0" step="1" disabled></td>`).join('')
+  }</tr>`).join('');
+  wrap.innerHTML = `
+    <label class="optional-label" for="prep_enable" style="margin-bottom:8px;">
+      <input type="checkbox" id="prep_enable">
+      準備期間（開業前6ヶ月）を表示する
+    </label>
+    <div class="table-scroll" style="max-height:none;">
+      <table class="month-input-table" style="min-width:560px;">
+        <thead><tr><th>項目（万円）</th>${head}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  const cb = document.getElementById('prep_enable');
+  cb.addEventListener('change', ()=>{
+    wrap.querySelectorAll('input[type=number]').forEach(el=>{ el.disabled = !cb.checked; });
+  });
 }
 
 // 補助金（デジタル化・AI導入補助金）・助成金のチェックボックスを組み立てる。
@@ -1058,6 +1105,14 @@ function computeReportData(){
     CURRENT_INQUIRY_Y2 = CURRENT_INQUIRY_MONTHLY_ARR.slice(12,24).reduce((a,b)=>a+b,0);
   }
 
+  // 準備期間：チェックが入っていれば手入力値を読み取る（外れていれば全て0）。
+  // 準備期間の損益合計は、1ヶ月目の累計損益にそのまま繰り越す。
+  CURRENT_PREP_ENABLED = !!document.getElementById('prep_enable')?.checked;
+  PREP_ROWS.forEach(r=>{
+    CURRENT_PREP[r.key] = Array.from({length:PREP_MONTHS}, (_,i)=> CURRENT_PREP_ENABLED ? readNum(`prep_${r.key}_${i+1}`) : 0);
+  });
+  const prepProfitTotal = CURRENT_PREP.sales.reduce((s,v,i)=> s + v - CURRENT_PREP.cost[i] - CURRENT_PREP.sga[i], 0);
+
   PLAN_DEFS.forEach(p=>{
     const initial = { ...sharedInitial };
     // イニシャルコスト（物件王初期費用・年会費）は助成金チェック時のみ税込にする。
@@ -1109,7 +1164,7 @@ function computeReportData(){
     const cumulativeProfit = [];
     operatingProfit.forEach((v,i)=>{
       if(i === 0){
-        cumulativeProfit.push(v - initialSum);
+        cumulativeProfit.push(prepProfitTotal + v - initialSum);
       } else if(i === 12){
         cumulativeProfit.push(cumulativeProfit[i-1] + v - initial.annual_fee);
       } else {
@@ -1221,7 +1276,28 @@ function buildCompositionLegendRows(comp){
       <span class="c-pct">${c.pct.toFixed(1)}%</span>
     </li>`).join('');
 }
+// 準備期間の列（準備1〜6ヶ月目＋準備期間計）。asBalanceがtrueの行（累計損益）は
+// 合計せず最終月の残高を「準備期間計」にする。
+function buildPrepCells(arr, asBalance){
+  const cells = arr.map(v=>({text:fmtNum(v), neg:v<0}));
+  const tot = asBalance ? arr[arr.length-1] : arr.reduce((a,b)=>a+b,0);
+  cells.push({text:fmtNum(tot), neg:tot<0, isTotal:true});
+  return cells;
+}
+function buildPrepRows(){
+  const P = CURRENT_PREP;
+  const gross = P.sales.map((v,i)=>v - P.cost[i]);
+  const op = gross.map((v,i)=>v - P.sga[i]);
+  let run = 0;
+  const cum = op.map(v=>(run += v));
+  return {
+    sales: buildPrepCells(P.sales), cost: buildPrepCells(P.cost), gross: buildPrepCells(gross),
+    sga: buildPrepCells(P.sga), op: buildPrepCells(op), cum: buildPrepCells(cum, true),
+  };
+}
+
 function buildTableSections(p){
+  const pr = CURRENT_PREP_ENABLED ? buildPrepRows() : {};
   // 反響数は全プラン共通の値（CURRENT_INQUIRY_MONTHLY_ARR）なので、プランごとの
   // 集計値ではなくモジュール変数をそのまま参照する。チェックが外れていれば
   // セクションごと出さない。
@@ -1232,17 +1308,17 @@ function buildTableSections(p){
     ...inquirySection,
     {title:'売上件数内訳（件）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.countLabel, cells:buildCells(p.countsByCat[cat.key])}))},
     {title:'売上内訳（万円）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.salesByCat[cat.key])}))},
-    {title:null, rows:[{label:'売上合計(A)', rowClass:'total-row', cells:buildCells(p.salesTotal)}]},
+    {title:null, rows:[{label:'売上合計(A)', rowClass:'total-row', cells:buildCells(p.salesTotal), prepCells:pr.sales}]},
     {title:'原価内訳（万円）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.costByCat[cat.key])}))},
     {title:null, rows:[
-      {label:'原価合計(B)', rowClass:'total-row', cells:buildCells(p.costTotal)},
-      {label:'粗利(A-B)', rowClass:'total-row', cells:buildCells(p.grossProfit)},
+      {label:'原価合計(B)', rowClass:'total-row', cells:buildCells(p.costTotal), prepCells:pr.cost},
+      {label:'粗利(A-B)', rowClass:'total-row', cells:buildCells(p.grossProfit), prepCells:pr.gross},
     ]},
     {title:'販管費内訳（万円）', rows: CURRENT_SGA_FIELDS.concat(PLAN_SGA_FIELD_DEFS).map(f=>({label:f.label, cells:buildCells(Array(24).fill(p.sgaByItem[f.id]))}))},
     {title:null, rows:[
-      {label:'販管費合計(C)', rowClass:'total-row', cells:buildCells(p.sgaTotal)},
-      {label:'営業利益(A-B-C)', rowClass:'highlight-row', cells:buildCells(p.operatingProfit)},
-      {label:'累計損益', rowClass:'highlight-row', cells:buildCellsAsBalance(p.cumulativeProfit)},
+      {label:'販管費合計(C)', rowClass:'total-row', cells:buildCells(p.sgaTotal), prepCells:pr.sga},
+      {label:'営業利益(A-B-C)', rowClass:'highlight-row', cells:buildCells(p.operatingProfit), prepCells:pr.op},
+      {label:'累計損益', rowClass:'highlight-row', cells:buildCellsAsBalance(p.cumulativeProfit), prepCells:pr.cum},
     ]},
   ];
 }
@@ -1337,15 +1413,23 @@ function buildPlanPanelHTML(p, isActive){
     </div>`;
   })() : '';
 
-  const theadCells = headers.map(h=>`<th class="${h.isTotal ? 'year-total' : ''}">${h.label}</th>`).join('');
+  // 準備期間の列（チェック時のみ）。ヘッダー・各行の先頭（1ヶ月目より前）に差し込む。
+  const prepHead = CURRENT_PREP_ENABLED
+    ? Array.from({length:PREP_MONTHS}, (_,i)=>`<th class="prep-col">準備${i+1}ヶ月目</th>`).join('') + '<th class="prep-col prep-total">準備期間計</th>'
+    : '';
+  const blankPrep = CURRENT_PREP_ENABLED ? '<td class="prep-col"></td>'.repeat(PREP_MONTHS + 1) : '';
+  const prepBody = r => !CURRENT_PREP_ENABLED ? '' : (r.prepCells
+    ? r.prepCells.map(c=>`<td class="prep-col${c.neg ? ' neg' : ''}${c.isTotal ? ' prep-total' : ''}">${c.text}</td>`).join('')
+    : blankPrep);
+  const theadCells = prepHead + headers.map(h=>`<th class="${h.isTotal ? 'year-total' : ''}">${h.label}</th>`).join('');
   const tbodyHtml = sections.map(sec=>{
     const sectionRow = sec.title
-      ? `<tr class="section-row"><th>${sec.title}</th>${headers.map(h=>`<td class="${h.isTotal ? 'year-total' : ''}"></td>`).join('')}</tr>`
+      ? `<tr class="section-row"><th>${sec.title}</th>${blankPrep}${headers.map(h=>`<td class="${h.isTotal ? 'year-total' : ''}"></td>`).join('')}</tr>`
       : '';
     const rows = sec.rows.map(r=>`
       <tr class="${r.rowClass || ''}">
         <th>${r.label}</th>
-        ${r.cells.map(c=>`<td class="${c.neg ? 'neg ' : ''}${c.isTotal ? 'year-total' : ''}">${c.text}</td>`).join('')}
+        ${prepBody(r)}${r.cells.map(c=>`<td class="${c.neg ? 'neg ' : ''}${c.isTotal ? 'year-total' : ''}">${c.text}</td>`).join('')}
       </tr>`).join('');
     return sectionRow + rows;
   }).join('');
@@ -1666,6 +1750,9 @@ function captureInputSnapshot(){
   { const el = document.getElementById('employment_grant_headcount'); if(el) snap.employmentGrantHeadcount = el.value; }
   { const el = document.getElementById('inquiry_enable'); if(el) snap.inquiryEnabled = el.checked; }
   { const el = document.getElementById('inquiry_monthly'); if(el) snap.inquiryMonthly = el.value; }
+  { const el = document.getElementById('prep_enable'); if(el) snap.prepEnabled = el.checked; }
+  snap.prep = {};
+  PREP_ROWS.forEach(r=>{ snap.prep[r.key] = Array.from({length:PREP_MONTHS}, (_,i)=>{ const el = document.getElementById(`prep_${r.key}_${i+1}`); return el ? el.value : '0'; }); });
   PLAN_DEFS.forEach(p=>{
     const planSnap = { initial: {}, sga: {}, counts: {} };
     INITIAL_COST_DEFS.forEach(ic=>{ const el = document.getElementById(`plan_${p.slug}_initial_${ic.key}`); if(el) planSnap.initial[ic.key] = el.value; });
@@ -1726,6 +1813,11 @@ function applyInputSnapshot(snap){
     setChecked('inquiry_enable', snap.inquiryEnabled);
     const inquiryInput = document.getElementById('inquiry_monthly');
     if(inquiryInput) inquiryInput.disabled = !snap.inquiryEnabled;
+  }
+  if(snap.prep) PREP_ROWS.forEach(r=>{ const arr = snap.prep[r.key]; if(arr) arr.forEach((v,i)=>setVal(`prep_${r.key}_${i+1}`, v)); });
+  if(snap.prepEnabled !== undefined){
+    setChecked('prep_enable', snap.prepEnabled);
+    PREP_ROWS.forEach(r=>{ for(let m=1; m<=PREP_MONTHS; m++){ const el = document.getElementById(`prep_${r.key}_${m}`); if(el) el.disabled = !snap.prepEnabled; } });
   }
   recalcWelfareDisplay();
   if(snap.plans) PLAN_DEFS.forEach(p=>{
@@ -1897,6 +1989,7 @@ function maybeAutoSaveAfterGenerate(){
 // ---- 6. ページ初期化 ----
 buildMasterFields();
 buildInquiryToggle();
+buildPrepUI();
 buildCategoryToggles();
 buildDisplayToggles();
 buildSubsidyToggles();
@@ -1962,7 +2055,12 @@ function adjustMonthlyTableForPrint(){
   const CARD_CHROME_PX = 60;
   const available = Math.max(PAGE_USABLE_HEIGHT_PX - CARD_CHROME_PX, 200);
 
-  const fontSizePx = 10; // table{font-size:10px}（印刷用CSS）と合わせる
+  // 準備期間の列を出している場合は列数が7つ増えて横幅が足りなくなるため、文字サイズと
+  // 左右の余白を詰めて1ページの横幅に収める（印刷用CSSの既定値は10px/3px）。
+  const hasPrepCols = !!table.querySelector('.prep-col');
+  const fontSizePx = hasPrepCols ? 7.5 : 10;
+  document.documentElement.style.setProperty('--print-table-font-size', fontSizePx + 'px');
+  document.documentElement.style.setProperty('--print-table-hpadding', (hasPrepCols ? 1.5 : 3) + 'px');
   const lineHeight = 1.3;
   const borderPx = 1; // 行の下罫線ぶん
   const textHeight = fontSizePx * lineHeight;
