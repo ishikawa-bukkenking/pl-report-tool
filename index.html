@@ -388,7 +388,7 @@
       <div class="hint" style="margin-bottom:12px;">チェックを入れると、レポートのサマリー・前提条件に反響数（見込み客からの問い合わせ件数）の目安を表示します。入力するのは「毎月の反響数」です。開業直後は立ち上がりに時間がかかるため、1〜3ヶ月目は入力した数値の50%、4〜6ヶ月目は80%、7ヶ月目以降（2年目含む）は100%の件数で自動計算します。</div>
       <div class="field-grid" id="inquiryFields" style="margin-bottom:18px; grid-template-columns:minmax(180px,220px);"></div>
       <div class="builder-subhead">準備期間（開業前6ヶ月）</div>
-      <div class="hint" style="margin-bottom:12px;">チェックを入れると、月次損益テーブルの「1ヶ月目」より前に「準備1〜6ヶ月目」の列を追加します。売上・原価・販管費を手入力でき（初期値はすべて0）、入力した内容は営業利益・累計損益にも反映されます。</div>
+      <div class="hint" style="margin-bottom:12px;">チェックを入れると、月次損益テーブルの「1ヶ月目」より前に「準備1〜6ヶ月目」の列を追加します。販管費の各項目を手入力でき（初期値はすべて0）、入力した内容は営業利益・累計損益にも反映されます（売上・原価・反響数は準備期間には入れません）。</div>
       <div id="prepFields" style="margin-bottom:18px;"></div>
       <div class="builder-subhead">取り扱う商品カテゴリ</div>
       <div class="hint" style="margin-bottom:12px;">チェックを外すと、そのカテゴリは月別件数の入力欄・レポートの各表・売上構成グラフに表示されなくなります（仲介手数料・建築紹介は常に表示されます）。</div>
@@ -569,16 +569,13 @@ let CURRENT_INQUIRY_Y2 = 0;
 let CURRENT_INQUIRY_MONTHLY_ARR = Array(24).fill(0);
 
 // 準備期間（1ヶ月目より前の6ヶ月）：チェックを入れると月次損益テーブルの先頭に
-// 「準備1〜6ヶ月目＋準備期間計」の列を追加する。売上・原価・販管費の合計だけを
-// 手入力でき（初期値はすべて0）、営業利益・累計損益にも反映する。全プラン共通。
+// 「準備1〜6ヶ月目＋準備期間計」の列を追加する。入力できるのは販管費の各項目だけ
+// （初期値はすべて0）で、売上・原価・反響数は準備期間には出さない。営業利益・
+// 累計損益にも反映する。全プラン共通。
 const PREP_MONTHS = 6;
-const PREP_ROWS = [
-  {key:'sales', label:'売上合計(A)'},
-  {key:'cost',  label:'原価合計(B)'},
-  {key:'sga',   label:'販管費合計(C)'},
-];
+const PREP_SGA_DEFS = SGA_FIELD_DEFS.concat(PLAN_SGA_FIELD_DEFS);
 let CURRENT_PREP_ENABLED = false;
-let CURRENT_PREP = { sales:Array(PREP_MONTHS).fill(0), cost:Array(PREP_MONTHS).fill(0), sga:Array(PREP_MONTHS).fill(0) };
+let CURRENT_PREP = {}; // 販管費項目id -> 準備1〜6ヶ月目の金額（有効な項目のみ）
 
 // 月別件数の初期値は、物件王の標準テンプレートExcel（損益計算書_株式会社テンプレート様）の
 // 実際の入力値（ライト/ベーシック/スタンダード各シートの売上件数内訳）をそのまま反映している。
@@ -814,8 +811,8 @@ function buildPrepUI(){
   const wrap = document.getElementById('prepFields');
   if(!wrap) return;
   const head = Array.from({length:PREP_MONTHS}, (_,i)=>`<th>準備${i+1}ヶ月目</th>`).join('');
-  const rows = PREP_ROWS.map(r=>`<tr><th>${r.label}</th>${
-    Array.from({length:PREP_MONTHS}, (_,i)=>`<td><input type="number" id="prep_${r.key}_${i+1}" value="0" step="1" disabled></td>`).join('')
+  const rows = PREP_SGA_DEFS.map(f=>`<tr><th>${f.label}</th>${
+    Array.from({length:PREP_MONTHS}, (_,i)=>`<td><input type="number" id="prep_sga_${f.id}_${i+1}" value="0" step="1" disabled></td>`).join('')
   }</tr>`).join('');
   wrap.innerHTML = `
     <label class="optional-label" for="prep_enable" style="margin-bottom:8px;">
@@ -824,7 +821,7 @@ function buildPrepUI(){
     </label>
     <div class="table-scroll" style="max-height:none;">
       <table class="month-input-table" style="min-width:560px;">
-        <thead><tr><th>項目（万円）</th>${head}</tr></thead>
+        <thead><tr><th>販管費（万円/月）</th>${head}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -1108,10 +1105,11 @@ function computeReportData(){
   // 準備期間：チェックが入っていれば手入力値を読み取る（外れていれば全て0）。
   // 準備期間の損益合計は、1ヶ月目の累計損益にそのまま繰り越す。
   CURRENT_PREP_ENABLED = !!document.getElementById('prep_enable')?.checked;
-  PREP_ROWS.forEach(r=>{
-    CURRENT_PREP[r.key] = Array.from({length:PREP_MONTHS}, (_,i)=> CURRENT_PREP_ENABLED ? readNum(`prep_${r.key}_${i+1}`) : 0);
+  CURRENT_PREP = {};
+  CURRENT_SGA_FIELDS.concat(PLAN_SGA_FIELD_DEFS).forEach(f=>{
+    CURRENT_PREP[f.id] = Array.from({length:PREP_MONTHS}, (_,i)=> CURRENT_PREP_ENABLED ? readNum(`prep_sga_${f.id}_${i+1}`) : 0);
   });
-  const prepProfitTotal = CURRENT_PREP.sales.reduce((s,v,i)=> s + v - CURRENT_PREP.cost[i] - CURRENT_PREP.sga[i], 0);
+  const prepProfitTotal = -Object.values(CURRENT_PREP).reduce((t,arr)=> t + arr.reduce((a,b)=>a+b,0), 0);
 
   PLAN_DEFS.forEach(p=>{
     const initial = { ...sharedInitial };
@@ -1285,15 +1283,14 @@ function buildPrepCells(arr, asBalance){
   return cells;
 }
 function buildPrepRows(){
-  const P = CURRENT_PREP;
-  const gross = P.sales.map((v,i)=>v - P.cost[i]);
-  const op = gross.map((v,i)=>v - P.sga[i]);
+  // 準備期間は販管費だけを扱う（売上・原価は0）。営業利益＝−販管費合計。
+  const sgaTotal = Array.from({length:PREP_MONTHS}, (_,i)=> Object.values(CURRENT_PREP).reduce((t,arr)=> t + arr[i], 0));
+  const op = sgaTotal.map(v=>-v);
   let run = 0;
   const cum = op.map(v=>(run += v));
-  return {
-    sales: buildPrepCells(P.sales), cost: buildPrepCells(P.cost), gross: buildPrepCells(gross),
-    sga: buildPrepCells(P.sga), op: buildPrepCells(op), cum: buildPrepCells(cum, true),
-  };
+  const sgaItems = {};
+  Object.keys(CURRENT_PREP).forEach(id=>{ sgaItems[id] = buildPrepCells(CURRENT_PREP[id]); });
+  return { sgaItems, sga: buildPrepCells(sgaTotal), op: buildPrepCells(op), cum: buildPrepCells(cum, true) };
 }
 
 function buildTableSections(p){
@@ -1308,13 +1305,13 @@ function buildTableSections(p){
     ...inquirySection,
     {title:'売上件数内訳（件）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.countLabel, cells:buildCells(p.countsByCat[cat.key])}))},
     {title:'売上内訳（万円）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.salesByCat[cat.key])}))},
-    {title:null, rows:[{label:'売上合計(A)', rowClass:'total-row', cells:buildCells(p.salesTotal), prepCells:pr.sales}]},
+    {title:null, rows:[{label:'売上合計(A)', rowClass:'total-row', cells:buildCells(p.salesTotal)}]},
     {title:'原価内訳（万円）', rows: CURRENT_CATEGORIES.map(cat=>({label:cat.label, cells:buildCells(p.costByCat[cat.key])}))},
     {title:null, rows:[
-      {label:'原価合計(B)', rowClass:'total-row', cells:buildCells(p.costTotal), prepCells:pr.cost},
-      {label:'粗利(A-B)', rowClass:'total-row', cells:buildCells(p.grossProfit), prepCells:pr.gross},
+      {label:'原価合計(B)', rowClass:'total-row', cells:buildCells(p.costTotal)},
+      {label:'粗利(A-B)', rowClass:'total-row', cells:buildCells(p.grossProfit)},
     ]},
-    {title:'販管費内訳（万円）', rows: CURRENT_SGA_FIELDS.concat(PLAN_SGA_FIELD_DEFS).map(f=>({label:f.label, cells:buildCells(Array(24).fill(p.sgaByItem[f.id]))}))},
+    {title:'販管費内訳（万円）', rows: CURRENT_SGA_FIELDS.concat(PLAN_SGA_FIELD_DEFS).map(f=>({label:f.label, cells:buildCells(Array(24).fill(p.sgaByItem[f.id])), prepCells:(pr.sgaItems||{})[f.id]}))},
     {title:null, rows:[
       {label:'販管費合計(C)', rowClass:'total-row', cells:buildCells(p.sgaTotal), prepCells:pr.sga},
       {label:'営業利益(A-B-C)', rowClass:'highlight-row', cells:buildCells(p.operatingProfit), prepCells:pr.op},
@@ -1751,8 +1748,8 @@ function captureInputSnapshot(){
   { const el = document.getElementById('inquiry_enable'); if(el) snap.inquiryEnabled = el.checked; }
   { const el = document.getElementById('inquiry_monthly'); if(el) snap.inquiryMonthly = el.value; }
   { const el = document.getElementById('prep_enable'); if(el) snap.prepEnabled = el.checked; }
-  snap.prep = {};
-  PREP_ROWS.forEach(r=>{ snap.prep[r.key] = Array.from({length:PREP_MONTHS}, (_,i)=>{ const el = document.getElementById(`prep_${r.key}_${i+1}`); return el ? el.value : '0'; }); });
+  snap.prepSga = {};
+  PREP_SGA_DEFS.forEach(f=>{ snap.prepSga[f.id] = Array.from({length:PREP_MONTHS}, (_,i)=>{ const el = document.getElementById(`prep_sga_${f.id}_${i+1}`); return el ? el.value : '0'; }); });
   PLAN_DEFS.forEach(p=>{
     const planSnap = { initial: {}, sga: {}, counts: {} };
     INITIAL_COST_DEFS.forEach(ic=>{ const el = document.getElementById(`plan_${p.slug}_initial_${ic.key}`); if(el) planSnap.initial[ic.key] = el.value; });
@@ -1814,10 +1811,10 @@ function applyInputSnapshot(snap){
     const inquiryInput = document.getElementById('inquiry_monthly');
     if(inquiryInput) inquiryInput.disabled = !snap.inquiryEnabled;
   }
-  if(snap.prep) PREP_ROWS.forEach(r=>{ const arr = snap.prep[r.key]; if(arr) arr.forEach((v,i)=>setVal(`prep_${r.key}_${i+1}`, v)); });
+  if(snap.prepSga) PREP_SGA_DEFS.forEach(f=>{ const arr = snap.prepSga[f.id]; if(arr) arr.forEach((v,i)=>setVal(`prep_sga_${f.id}_${i+1}`, v)); });
   if(snap.prepEnabled !== undefined){
     setChecked('prep_enable', snap.prepEnabled);
-    PREP_ROWS.forEach(r=>{ for(let m=1; m<=PREP_MONTHS; m++){ const el = document.getElementById(`prep_${r.key}_${m}`); if(el) el.disabled = !snap.prepEnabled; } });
+    PREP_SGA_DEFS.forEach(f=>{ for(let m=1; m<=PREP_MONTHS; m++){ const el = document.getElementById(`prep_sga_${f.id}_${m}`); if(el) el.disabled = !snap.prepEnabled; } });
   }
   recalcWelfareDisplay();
   if(snap.plans) PLAN_DEFS.forEach(p=>{
