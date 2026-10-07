@@ -170,9 +170,7 @@
   thead th.year-total{ background:var(--accent); color:#fff; }
   /* 準備期間（開業前）の列：通常の月と見分けやすいよう、ヘッダーはグレー系・本体は薄いグレーにする */
   thead th.prep-col{ background:#6b7a99; color:#fff; }
-  thead th.prep-col.prep-total{ background:#4a5878; }
   tbody td.prep-col{ background:#f3f4f8; }
-  tbody td.prep-col.prep-total{ background:#e6e9f1; font-weight:700; }
   tbody tr.highlight-row td.prep-col{ background:var(--navy); }
   tbody th{ text-align:left; padding:7px 10px; white-space:nowrap; background:var(--surface-alt); position:sticky; left:0; font-weight:500; border-bottom:1px solid var(--border); z-index:1; }
   tbody td{ padding:7px 10px; text-align:right; white-space:nowrap; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; }
@@ -569,7 +567,7 @@ let CURRENT_INQUIRY_Y2 = 0;
 let CURRENT_INQUIRY_MONTHLY_ARR = Array(24).fill(0);
 
 // 準備期間（1ヶ月目より前の6ヶ月）：チェックを入れると月次損益テーブルの先頭に
-// 「準備1〜6ヶ月目＋準備期間計」の列を追加する。入力できるのは販管費の各項目だけ
+// 「準備1〜6ヶ月目」の列を追加する。入力できるのは販管費の各項目だけ
 // （初期値はすべて0）で、売上・原価・反響数は準備期間には出さない。営業利益・
 // 累計損益にも反映する。全プラン共通。
 const PREP_MONTHS = 6;
@@ -1274,13 +1272,9 @@ function buildCompositionLegendRows(comp){
       <span class="c-pct">${c.pct.toFixed(1)}%</span>
     </li>`).join('');
 }
-// 準備期間の列（準備1〜6ヶ月目＋準備期間計）。asBalanceがtrueの行（累計損益）は
-// 合計せず最終月の残高を「準備期間計」にする。
-function buildPrepCells(arr, asBalance){
-  const cells = arr.map(v=>({text:fmtNum(v), neg:v<0}));
-  const tot = asBalance ? arr[arr.length-1] : arr.reduce((a,b)=>a+b,0);
-  cells.push({text:fmtNum(tot), neg:tot<0, isTotal:true});
-  return cells;
+// 準備期間の列（準備1〜6ヶ月目）。合計列は設けず、月ごとの値だけを出す。
+function buildPrepCells(arr){
+  return arr.map(v=>({text:fmtNum(v), neg:v<0}));
 }
 function buildPrepRows(){
   // 準備期間は販管費だけを扱う（売上・原価は0）。営業利益＝−販管費合計。
@@ -1290,7 +1284,7 @@ function buildPrepRows(){
   const cum = op.map(v=>(run += v));
   const sgaItems = {};
   Object.keys(CURRENT_PREP).forEach(id=>{ sgaItems[id] = buildPrepCells(CURRENT_PREP[id]); });
-  return { sgaItems, sga: buildPrepCells(sgaTotal), op: buildPrepCells(op), cum: buildPrepCells(cum, true) };
+  return { sgaItems, sga: buildPrepCells(sgaTotal), op: buildPrepCells(op), cum: buildPrepCells(cum) };
 }
 
 function buildTableSections(p){
@@ -1412,11 +1406,11 @@ function buildPlanPanelHTML(p, isActive){
 
   // 準備期間の列（チェック時のみ）。ヘッダー・各行の先頭（1ヶ月目より前）に差し込む。
   const prepHead = CURRENT_PREP_ENABLED
-    ? Array.from({length:PREP_MONTHS}, (_,i)=>`<th class="prep-col">準備${i+1}ヶ月目</th>`).join('') + '<th class="prep-col prep-total">準備期間計</th>'
+    ? Array.from({length:PREP_MONTHS}, (_,i)=>`<th class="prep-col">準備${i+1}ヶ月目</th>`).join('')
     : '';
-  const blankPrep = CURRENT_PREP_ENABLED ? '<td class="prep-col"></td>'.repeat(PREP_MONTHS + 1) : '';
+  const blankPrep = CURRENT_PREP_ENABLED ? '<td class="prep-col"></td>'.repeat(PREP_MONTHS) : '';
   const prepBody = r => !CURRENT_PREP_ENABLED ? '' : (r.prepCells
-    ? r.prepCells.map(c=>`<td class="prep-col${c.neg ? ' neg' : ''}${c.isTotal ? ' prep-total' : ''}">${c.text}</td>`).join('')
+    ? r.prepCells.map(c=>`<td class="prep-col${c.neg ? ' neg' : ''}">${c.text}</td>`).join('')
     : blankPrep);
   const theadCells = prepHead + headers.map(h=>`<th class="${h.isTotal ? 'year-total' : ''}">${h.label}</th>`).join('');
   const tbodyHtml = sections.map(sec=>{
