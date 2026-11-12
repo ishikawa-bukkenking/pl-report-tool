@@ -424,7 +424,7 @@
       <h2>3. プラン設定</h2>
       <div class="hint">プランごとに「イニシャルコスト」と「月別件数」を設定します。件数は24ヶ月分を1マスずつ直接入力してください。</div>
       <div class="builder-subhead">レポートに表示するプラン</div>
-      <div class="hint" style="margin-bottom:12px;">チェックを入れたプランだけが、下の入力タブとレポートに表示されます（1つ以上選んでください）。Sプランは不動産仲介のみのプランで、選ぶと必要な紹介料（リフォーム紹介料・建築紹介料）が自動でオンになります。</div>
+      <div class="hint" style="margin-bottom:12px;">Sプラン・ライト・ベーシック・スタンダードの4プランから、チェックを入れたプランだけが下の入力タブとレポートに表示されます（1つ以上選んでください）。Sプランは不動産仲介のみのプランで、選ぶと必要な紹介料（リフォーム紹介料・建築紹介料）が自動でオンになります。</div>
       <div class="field-grid" id="planSelector" style="margin-bottom:18px;"></div>
       <div class="builder-plan-tabs" id="builderPlanTabs"></div>
       <div id="builderPlanPanels"></div>
@@ -515,15 +515,17 @@ const SALARY_SGA_IDS = ['office_support', 'sales_salary'];
 // 売上7カテゴリ（原価は新築・リフォーム・リノベーションのみ発生。仲介手数料・各紹介料は原価ゼロ）
 // 仲介手数料以外は取り扱わない会社もあるため、optional:true でチェックボックスによる
 // 表示/非表示を切り替えられるようにしている（仲介手数料のみ常時表示）。紹介料3種
-// （建築・リフォーム・リノベーション）はdefaultChecked:falseのものは初期状態でオフ。
+// （建築・リフォーム・リノベーション）のうち、リノベーション紹介のみ初期状態でオフ。
+// リフォーム紹介・リノベーション紹介は、プランごとに件数がすべて0ならそのプランの
+// レポートには出さない（hideWhenAllZero）。
 const CATEGORIES = [
   {key:'brokerage', label:'仲介手数料', countLabel:'仲介件数', unitField:'brokerage_unit', marginField:null},
   {key:'newbuild', label:'新築', countLabel:'新築件数', unitField:'newbuild_unit', marginField:'newbuild_margin', optional:true},
   {key:'reform', label:'リフォーム', countLabel:'リフォーム件数', unitField:'reform_unit', marginField:'reform_margin', optional:true},
   {key:'renovation', label:'リノベーション', countLabel:'リノベーション件数', unitField:'renovation_unit', marginField:'renovation_margin', optional:true},
   {key:'referral', label:'建築紹介', toggleLabel:'建築紹介料', countLabel:'建築紹介件数', unitField:'referral_unit', marginField:null, optional:true},
-  {key:'reform_referral', label:'リフォーム紹介', toggleLabel:'リフォーム紹介料', countLabel:'リフォーム紹介件数', unitField:'reform_referral_unit', marginField:null, optional:true, defaultChecked:false},
-  {key:'renovation_referral', label:'リノベーション紹介', toggleLabel:'リノベーション紹介料', countLabel:'リノベーション紹介件数', unitField:'renovation_referral_unit', marginField:null, optional:true, defaultChecked:false},
+  {key:'reform_referral', label:'リフォーム紹介', toggleLabel:'リフォーム紹介料', countLabel:'リフォーム紹介件数', unitField:'reform_referral_unit', marginField:null, optional:true, hideWhenAllZero:true},
+  {key:'renovation_referral', label:'リノベーション紹介', toggleLabel:'リノベーション紹介料', countLabel:'リノベーション紹介件数', unitField:'renovation_referral_unit', marginField:null, optional:true, defaultChecked:false, hideWhenAllZero:true},
 ];
 // 実際に集計・表示の対象となるカテゴリ／販管費項目。チェックボックスの状態に応じて
 // computeReportData()の先頭で毎回作り直す（以降、計算・描画の各関数はこちらを参照する）。
@@ -602,6 +604,26 @@ let CURRENT_PREP = {}; // 販管費項目id -> 準備1〜6ヶ月目の金額（�
 // 月別件数の初期値は、物件王の標準テンプレートExcel（損益計算書_株式会社テンプレート様）の
 // 実際の入力値（ライト/ベーシック/スタンダード各シートの売上件数内訳）をそのまま反映している。
 const PLAN_DEFS = [
+  // Sプラン：不動産仲介のみのプラン（新築・リフォーム・リノベーションの請負は扱わず、
+  // 仲介手数料と、リフォーム紹介料・建築紹介料だけが売上になる）。件数・単価・イニシャル
+  // コストの初期値は、株式会社ディライト様向けに作成した損益計算書Excelの入力値を
+  // そのまま反映している。営業担当を置かないため営業給与は計上しない（法定福利費は
+  // 事務サポート給与のみから計算）。ライト・ベーシック・スタンダードと並ぶ4プランの先頭（最も小さいプラン）に置く。
+  {slug:'s', name:'S',
+    allowedCategories:['brokerage','referral','reform_referral'],
+    autoEnableCategories:['referral','reform_referral'],
+    excludeSga:['sales_salary'],
+    unitDefaults:{brokerage_unit:40, reform_referral_unit:25, referral_unit:75},
+    initialDefaults:{intro:200, annual_fee:165},
+    countDefaults:{
+      brokerage:   [0,0,2,2,2,2,2,2,2,2,2,2, 3,3,3,3,3,3,3,3,3,3,3,3],
+      newbuild:    [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
+      reform:      [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
+      renovation:  [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
+      referral:    [0,0,0,1,0,0,1,0,1,0,1,1, 0,1,0,1,1,1,1,1,1,1,1,1],
+      reform_referral:     [0,0,0,0,1,1,0,1,0,1,0,1, 1,0,1,0,1,1,1,1,1,1,1,1],
+      renovation_referral: [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
+    }},
   {slug:'light', name:'ライト',
     initialDefaults:{intro:350, annual_fee:240},
     countDefaults:{
@@ -633,26 +655,6 @@ const PLAN_DEFS = [
       renovation:  [0,0,0,0,0,0,1,0,0,0,0,0, 1,0,0,0,0,0,0,0,1,0,0,0],
       referral:    [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,1,0,0,0,0],
       reform_referral:     [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
-      renovation_referral: [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
-    }},
-  // Sプラン：不動産仲介のみのプラン（新築・リフォーム・リノベーションの請負は扱わず、
-  // 仲介手数料と、リフォーム紹介料・建築紹介料だけが売上になる）。件数・単価・イニシャル
-  // コストの初期値は、株式会社ディライト様向けに作成した損益計算書Excelの入力値を
-  // そのまま反映している。営業担当を置かないため営業給与は計上しない（法定福利費は
-  // 事務サポート給与のみから計算）。defaultEnabled:falseで、初期状態はレポートに出さない。
-  {slug:'s', name:'S', defaultEnabled:false,
-    allowedCategories:['brokerage','referral','reform_referral'],
-    autoEnableCategories:['referral','reform_referral'],
-    excludeSga:['sales_salary'],
-    unitDefaults:{brokerage_unit:40, reform_referral_unit:25, referral_unit:75},
-    initialDefaults:{intro:200, annual_fee:165},
-    countDefaults:{
-      brokerage:   [0,0,2,2,2,2,2,2,2,2,2,2, 3,3,3,3,3,3,3,3,3,3,3,3],
-      newbuild:    [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
-      reform:      [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
-      renovation:  [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
-      referral:    [0,0,0,1,0,0,1,0,1,0,1,1, 0,1,0,1,1,1,1,1,1,1,1,1],
-      reform_referral:     [0,0,0,0,1,1,0,1,0,1,0,1, 1,0,1,0,1,1,1,1,1,1,1,1],
       renovation_referral: [0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0],
     }},
 ];
@@ -1228,7 +1230,8 @@ function computeReportData(){
 
   PLAN_DEFS.filter(p=>isPlanEnabled(p.slug)).forEach(p=>{
     // このプランで扱うカテゴリ（Sプランは仲介手数料・紹介料のみ）と、除外する販管費項目
-    const planCats = CURRENT_CATEGORIES.filter(c=>!p.allowedCategories || p.allowedCategories.includes(c.key));
+    const allowedCats = CURRENT_CATEGORIES.filter(c=>!p.allowedCategories || p.allowedCategories.includes(c.key));
+    const planCats = allowedCats.filter(c=>!c.hideWhenAllZero || Array.from({length:24}, (_,i)=>readNum(`plan_${p.slug}_count_${c.key}_${i+1}`)).some(v=>v>0));
     const excludeSga = p.excludeSga || [];
     const initial = { ...sharedInitial };
     // イニシャルコスト（物件王初期費用・年会費）は助成金チェック時のみ税込にする。
@@ -1947,6 +1950,10 @@ function applyInputSnapshot(snap){
   }
   if(snap.planEnabled){
     PLAN_DEFS.forEach(p=>{ if(snap.planEnabled[p.slug] !== undefined) setChecked(`plan_enable_${p.slug}`, snap.planEnabled[p.slug]); });
+    applyPlanSelection();
+  } else {
+    // プラン選択を保存する前（Sプラン追加前）に保存された古いレポートは、当時の3プランのまま開く。
+    setChecked('plan_enable_s', false);
     applyPlanSelection();
   }
   recalcWelfareDisplay();
